@@ -1,0 +1,1 @@
+- [ ] Create conformance tests for locale-formatting amendment

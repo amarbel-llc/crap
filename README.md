@@ -1,7 +1,8 @@
 CRAP: Cascading Readable Annotated Prose
 =========================================
 
-*Your build output is crap — so we made it CRAP.*
+*Your build output is crap — so we made it CRAP.*\
+*Don't output garbage, output CRAP.*
 
 A fork of TAP focused on making trees of script output easy to visually
 understand. Primarily meant for human consumers.

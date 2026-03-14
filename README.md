@@ -1,4 +1,4 @@
-CRAP: Cascading Readable Annotated Prose
+CRAP: Command Result Accessibility Protocol
 =========================================
 
 *Don't output garbage, output CRAP.*

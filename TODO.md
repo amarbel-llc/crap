@@ -1,4 +1,4 @@
 - [ ] Create conformance tests for locale-formatting amendment
-- [ ] Use vhs to demo the rough-out tool
+- [ ] Use vhs to demo the :: tool
 - [ ] Update CRAP nomenclature: test points remain but use acronym TP more often throughout spec
 - [ ] Flatten all amendments into the CRAP-2 specification (no separate amendment docs)

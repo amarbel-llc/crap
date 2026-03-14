@@ -15,11 +15,11 @@ title: CRAP 2 specification
 
 # Name
 
-CRAP-2 - Cascading Readable Annotated Prose v2
+CRAP-2 - Command Result Accessibility Protocol v2
 
 ## Synopsis
 
-CRAP, Cascading Readable Annotated Prose, is a text-based format for
+CRAP, Command Result Accessibility Protocol, is a text-based format for
 structuring trees of script output so they are easy to visually understand.
 CRAP is a fork of TAP (the Test Anything Protocol) focused on human
 consumers. This document describes version 2 of CRAP.

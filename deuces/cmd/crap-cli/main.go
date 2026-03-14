@@ -53,9 +53,9 @@ func main() {
 }
 
 func printUsage() {
-	fmt.Fprintf(os.Stderr, "rough-out — CRAP-2 validator and writer toolkit\n\n")
+	fmt.Fprintf(os.Stderr, ":: — CRAP-2 validator and writer toolkit\n\n")
 	fmt.Fprintf(os.Stderr, "Usage:\n")
-	fmt.Fprintf(os.Stderr, "  rough-out [command] [flags]\n\n")
+	fmt.Fprintf(os.Stderr, "  :: [command] [flags]\n\n")
 	fmt.Fprintf(os.Stderr, "Commands:\n")
 	fmt.Fprintf(os.Stderr, "  validate              Validate CRAP-2 input\n")
 	fmt.Fprintf(os.Stderr, "  go-test [args...]     Run go test and convert output to CRAP-2\n")
@@ -285,7 +285,7 @@ func handleExec(ctx context.Context) error {
 	}, nil)
 
 	if len(rest) == 0 {
-		return fmt.Errorf("missing command\nusage: rough-out exec [--verbose] [--no-spinner] <cmd> [<arg1> <arg2> ...]")
+		return fmt.Errorf("missing command\nusage: :: exec [--verbose] [--no-spinner] <cmd> [<arg1> <arg2> ...]")
 	}
 
 	utility := rest[0]
@@ -325,17 +325,17 @@ func handleExecParallel(ctx context.Context) error {
 	}
 
 	if sepIdx < 0 {
-		return fmt.Errorf("missing ::: separator\nusage: rough-out exec-parallel [--verbose] <template> ::: <arg1> <arg2> ...")
+		return fmt.Errorf("missing ::: separator\nusage: :: exec-parallel [--verbose] <template> ::: <arg1> <arg2> ...")
 	}
 	if sepIdx == 0 {
-		return fmt.Errorf("missing command template before :::\nusage: rough-out exec-parallel [--verbose] <template> ::: <arg1> <arg2> ...")
+		return fmt.Errorf("missing command template before :::\nusage: :: exec-parallel [--verbose] <template> ::: <arg1> <arg2> ...")
 	}
 
 	template := strings.Join(rest[:sepIdx], " ")
 	execArgs := rest[sepIdx+1:]
 
 	if len(execArgs) == 0 {
-		return fmt.Errorf("no arguments after :::\nusage: rough-out exec-parallel [--verbose] <template> ::: <arg1> <arg2> ...")
+		return fmt.Errorf("no arguments after :::\nusage: :: exec-parallel [--verbose] <template> ::: <arg1> <arg2> ...")
 	}
 
 	color := stdoutIsTerminal()

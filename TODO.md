@@ -1,1 +1,3 @@
 - [ ] Create conformance tests for locale-formatting amendment
+- [ ] Use vhs to demo the rough-out tool
+- [ ] Update CRAP nomenclature: test points remain but use acronym TP more often throughout spec

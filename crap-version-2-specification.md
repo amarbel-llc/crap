@@ -569,6 +569,33 @@ The structure of a Pragma line is:
 - key: The name of the field being enabled or disabled.  ASCII alphanumeric
   characters, `_`, and `-` are allowed.
 
+#### Default State
+
+CRAP-2 is designed primarily for human consumption. To that end, all
+pragmas defined by the CRAP-2 specification and its amendments are
+**enabled by default**. Producers _should not_ emit `pragma +<key>` lines
+for standard CRAP-2 features — they are assumed active unless explicitly
+disabled.
+
+Pragma lines in CRAP-2 are therefore primarily used to _disable_ features:
+
+```tap
+CRAP version 2
+# disable ANSI display hints for this stream
+pragma -color
+
+# disable the status line
+pragma -status-line
+```
+
+Producers _may_ still emit `pragma +<key>` lines for clarity, but harnesses
+_must_ treat features as enabled whether or not an explicit `pragma +` line
+is present.
+
+Implementation-specific pragmas (those not defined in the CRAP-2
+specification or its amendments) have no default state, and _must_ be
+explicitly enabled with `pragma +<key>` if desired.
+
 For example:
 
 ```tap
@@ -585,7 +612,8 @@ pragma -bail
 ```
 
 The meaning and availability of keys that may be set by Pragmas are
-implementation-specific.
+implementation-specific, except where defined by the CRAP-2 specification
+and its amendments.
 
 Harnesses _may_ choose to respond to Pragma lines, or ignore them.
 
@@ -987,6 +1015,29 @@ failure, because the `strict` Pragma setting at the parent level was false.
 12. Any lines at the parent indentation level that occur between the
     Subtest Introduction and a valid Subtest Termination _must_ be treated
     as non-CRAP output.
+
+------
+
+## TAP-14 Compatibility
+
+CRAP-2 is a fork of TAP-14 and its wire format is intentionally close to
+TAP-14. A conformant CRAP-2 stream can be mechanically reformatted to a
+valid TAP-14 stream by:
+
+1. Replacing the version line `CRAP version 2` with `TAP version 14`.
+2. Inserting explicit `pragma +<key>` lines for any CRAP-2 features that
+   are enabled by default but require opt-in under TAP-14 (e.g., color,
+   status-line).
+3. Leaving all other lines unchanged — test points, plans, YAML
+   diagnostics, comments, subtests, and bail outs are wire-compatible.
+
+Producers _may_ offer a TAP-14 output mode that performs this
+transformation. Harnesses that consume TAP-14 _should_ be able to parse
+CRAP-2 output after this reformatting step.
+
+Similarly, a TAP-14 stream can be reformatted to CRAP-2 by replacing the
+version line and removing any `pragma +` lines for features that CRAP-2
+enables by default.
 
 ------
 

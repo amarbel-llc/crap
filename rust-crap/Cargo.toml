@@ -1,0 +1,10 @@
+[package]
+name = "rust-crap"
+version = "0.1.0"
+edition = "2021"
+description = "CRAP-2 writer library"
+
+[dependencies]
+icu_decimal = "2"
+icu_locale_core = "2"
+fixed_decimal = "0.7"

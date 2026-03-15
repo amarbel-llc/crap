@@ -1,7 +1,7 @@
 CRAP: Command Result Accessibility Protocol
 =========================================
 
-*Don't output garbage, output CRAP.*
+*Don't dump garbage, flush CRAP.*
 
 A fork of TAP focused on making trees of script output easy to visually
 understand. Primarily meant for human consumers.

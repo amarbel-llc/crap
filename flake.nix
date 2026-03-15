@@ -88,7 +88,7 @@
           inputsFrom = [
             go.devShells.${system}.default
             rust.devShells.${system}.default
-            shell.devShell.${system}
+            shell.devShells.${system}.default
           ];
 
           packages = [ just-us.packages.${system}.default ];

@@ -10,7 +10,7 @@ build-nix:
 test: test-go test-cargo
 
 test-go:
-    nix develop --command go test ./go-crap/...
+    cd go-crap && nix develop ../ --command go test ./...
 
 test-cargo:
     nix develop --command cargo test --manifest-path rust-crap/Cargo.toml

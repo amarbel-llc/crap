@@ -36,6 +36,10 @@ update: update-nix
 update-nix:
     nix flake update
 
+capture *ARGS:
+    mkdir -p captures
+    script -q captures/stdout.txt sh -c '{{ARGS}}' 2>captures/stderr.txt
+
 clean: clean-build
 
 clean-build:

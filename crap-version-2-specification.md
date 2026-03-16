@@ -17,6 +17,10 @@ title: CRAP 2 specification
 
 CRAP-2 - Command Result Accessibility Protocol v2
 
+Utilities that implement CRAP-2 are referred to as **crappy** — e.g.
+`crappy-git`, `crappy-lint`. The reference implementation CLI
+(`large-colon`, invoked as `::`) is itself crappy.
+
 ## Synopsis
 
 CRAP, Command Result Accessibility Protocol, is a text-based format for

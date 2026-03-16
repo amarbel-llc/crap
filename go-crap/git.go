@@ -59,6 +59,16 @@ func NewGitCloneParser() *GitPhaseParser {
 	}
 }
 
+// NewGitFetchParser returns a parser for git fetch output phases:
+// negotiate, receive, resolve.
+func NewGitFetchParser() *GitPhaseParser {
+	return &GitPhaseParser{
+		phaseOrder: []string{"negotiate", "receive", "resolve"},
+		classify:   classifyFetchLine,
+		phases:     make(map[string]*GitPhase),
+	}
+}
+
 // Classify returns the phase name for a line without accumulating it.
 func (p *GitPhaseParser) Classify(line string) string {
 	return p.classify(line)
@@ -136,6 +146,10 @@ func parserForSubcommand(args []string) *GitPhaseParser {
 		return NewGitPullParser()
 	case "push":
 		return NewGitPushParser()
+	case "clone":
+		return NewGitCloneParser()
+	case "fetch":
+		return NewGitFetchParser()
 	default:
 		return nil
 	}
@@ -368,6 +382,26 @@ func classifyCloneLine(line string) string {
 	if strings.HasPrefix(trimmed, "Updating files:") ||
 		strings.HasPrefix(trimmed, "Checking out files:") {
 		return "checkout"
+	}
+
+	return ""
+}
+
+func classifyFetchLine(line string) string {
+	trimmed := strings.TrimSpace(line)
+
+	if strings.HasPrefix(trimmed, "Receiving objects:") {
+		return "receive"
+	}
+
+	if strings.HasPrefix(trimmed, "Resolving deltas:") {
+		return "resolve"
+	}
+
+	if strings.HasPrefix(trimmed, "remote: ") ||
+		strings.HasPrefix(trimmed, "From ") ||
+		(len(line) > 0 && line[0] == ' ' && strings.Contains(trimmed, "->")) {
+		return "negotiate"
 	}
 
 	return ""

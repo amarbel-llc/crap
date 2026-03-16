@@ -394,3 +394,28 @@ func TestGitClonePhases(t *testing.T) {
 		}
 	}
 }
+
+func TestGitFetchPhases(t *testing.T) {
+	parser := NewGitFetchParser()
+
+	tests := []struct {
+		line  string
+		phase string
+	}{
+		{"remote: Enumerating objects: 5, done.", "negotiate"},
+		{"remote: Counting objects: 100% (5/5), done.", "negotiate"},
+		{"remote: Compressing objects: 100% (3/3), done.", "negotiate"},
+		{"remote: Total 3 (delta 2), reused 0 (delta 0)", "negotiate"},
+		{"Receiving objects: 100% (3/3), done.", "receive"},
+		{"Resolving deltas: 100% (2/2), done.", "resolve"},
+		{"From github.com:org/repo", "negotiate"},
+		{"   abc1234..def5678  main       -> origin/main", "negotiate"},
+	}
+
+	for _, tt := range tests {
+		got := parser.Classify(tt.line)
+		if got != tt.phase {
+			t.Errorf("Classify(%q) = %q, want %q", tt.line, got, tt.phase)
+		}
+	}
+}

@@ -37,21 +37,19 @@ document are to be interpreted as described in RFC 2119.
 
 ## Specification
 
-### Activation
+### Default State
 
-The pragma is activated with:
+The status line feature is enabled by default in CRAP-2. Producers
+do not need to emit `pragma +status-line` to use it. Producers that
+do not want this feature MAY disable it with:
 
-```tap
-pragma +status-line
+```crap-2
+pragma -status-line
 ```
-
-This pragma is document-wide. Once set, it applies for the remainder
-of the document. Producers MUST NOT deactivate it with
-`pragma -status-line` after activating it.
 
 ### Behavior
 
-When `status-line` is active, the producer MAY maintain a
+When `status-line` is active (the default), the producer MAY maintain a
 single trailing line at the end of the CRAP output that is continuously
 updated using ANSI escape sequences (cursor movement, line clearing,
 SGR color codes). This line:
@@ -69,10 +67,10 @@ by harnesses, consistent with CRAP-2's treatment of comment lines.
 
 ### Producer Requirements
 
-Producers SHOULD emit `pragma +status-line` only when standard
-output is a terminal (TTY). Producers MUST NOT emit this pragma when
-output is redirected to a file or pipe, unless the user has explicitly
-requested it (e.g., via a `--color=always` flag).
+Producers SHOULD only use the status line feature when standard
+output is a terminal (TTY). Producers SHOULD emit `pragma -status-line`
+when output is redirected to a file or pipe, unless the user has
+explicitly requested it (e.g., via a `--color=always` flag).
 
 Producers MAY respect the `NO_COLOR` environment variable. When
 `NO_COLOR` is set to a non-empty value, producers SHOULD suppress ANSI
@@ -103,20 +101,18 @@ notation:
 
 At time T1 (first test passed):
 
-```tap
-CRAP version 2
-pragma +status-line
-1..3
+```crap-2
+CRAP-2
+1::3
 ok 1 - compile
 # \033[36m⠋ running tests... 1/3 passed\033[0m
 ```
 
 At time T2 (all tests complete, trailing line rewritten):
 
-```tap
-CRAP version 2
-pragma +status-line
-1..3
+```crap-2
+CRAP-2
+1::3
 ok 1 - compile
 ok 2 - unit tests
 not ok 3 - integration tests
@@ -144,21 +140,22 @@ diagnostic block content.
 
 ### Interaction with Subtests
 
-In a subtest, `pragma +status-line` applies only to that
-subtest's document, consistent with CRAP-2's rule that subtest pragmas
-do not affect parent document parsing.
+In a subtest, the status line feature applies only to that subtest's
+document, consistent with CRAP-2's rule that subtest pragmas do not
+affect parent document parsing. A subtest may disable the feature with
+`pragma -status-line`.
 
-A parent document's `status-line` pragma does not
-automatically apply to child subtests. In practice, only the
-outermost document is likely to use this pragma, since only one
-trailing line can occupy the terminal's last row.
+The parent document's status line state does not automatically apply to
+child subtests. In practice, only the outermost document is likely to
+use this feature, since only one trailing line can occupy the terminal's
+last row.
 
 ### Backwards Compatibility
 
-Harnesses that do not recognize the `status-line` pragma MUST
-ignore it, per CRAP-2's pragma rules. The trailing line is a valid CRAP
-comment and will be treated as such. In non-TTY contexts the pragma is
-not emitted, so piped or file-based consumers are unaffected.
+The trailing line is a valid CRAP comment and will be treated as such
+by any CRAP-2 harness. In non-TTY contexts, producers should disable
+the feature with `pragma -status-line`, so piped or file-based consumers
+are unaffected.
 
 ## Security Considerations
 

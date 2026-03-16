@@ -55,6 +55,7 @@ Rendition) escape sequences:
 | `not ok` (in test status) | Red (SGR 31) |
 | `# SKIP` (directive) | Yellow (SGR 33) |
 | `# TODO` (directive) | Yellow (SGR 33) |
+| `# WARN` (directive) | Yellow (SGR 33) |
 | `Bail out!` | Red (SGR 31) |
 
 An SGR sequence has the form `ESC [ <code> m`, where `ESC` is the byte
@@ -117,9 +118,9 @@ escaping purposes.
 A colored CRAP stream as it appears on a terminal (SGR sequences shown
 in `\033[...m` notation):
 
-```tap
-CRAP version 2
-1..3
+```crap-2
+CRAP-2
+1::3
 \033[32mok\033[0m 1 - database connection
 \033[31mnot ok\033[0m 2 - query returns results
   ---
@@ -131,9 +132,9 @@ CRAP version 2
 
 After ANSI stripping by a harness, this is equivalent to:
 
-```tap
-CRAP version 2
-1..3
+```crap-2
+CRAP-2
+1::3
 ok 1 - database connection
 not ok 2 - query returns results
   ---
@@ -174,10 +175,9 @@ terminals and MUST produce clean (ANSI-free) CRAP when piped.
 
 ### Forwards Compatibility
 
-Future CRAP versions MAY define a pragma (e.g., `pragma +color`) to
-signal that a stream contains ANSI sequences. This amendment does not
-define such a pragma, as TTY detection by the producer is sufficient
-for current use cases.
+ANSI display hints are enabled by default in CRAP-2 and do not require
+a `pragma +color` line. Producers that do not want ANSI sequences MAY
+disable them with `pragma -color`.
 
 ## Authors
 

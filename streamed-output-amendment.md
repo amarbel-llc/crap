@@ -31,21 +31,19 @@ are written, rather than buffering the entire block until the closing
 
 ## Specification
 
-### Activation
+### Default State
 
-The pragma is activated with:
+The streamed output feature is enabled by default in CRAP-2. Producers
+do not need to emit `pragma +streamed-output` to use it. Producers that
+do not want this feature MAY disable it with:
 
-```tap
-pragma +streamed-output
+```crap-2
+pragma -streamed-output
 ```
-
-This pragma is document-wide. Once set, it applies to all subsequent
-YAML diagnostic blocks in the document. Producers _must not_ deactivate
-it with `pragma -streamed-output` after activating it.
 
 ### Incremental Output Delivery
 
-When `streamed-output` is active, producers _may_ flush individual
+When `streamed-output` is active (the default), producers _may_ flush individual
 lines of a YAML block scalar value as they become available, rather
 than buffering the entire block. This applies specifically to the
 `output` field (and any field that represents captured process output,
@@ -63,7 +61,7 @@ timing, not the format.
 
 ### Harness Behavior
 
-When `streamed-output` is active, harnesses _should_ display each line
+When `streamed-output` is active (the default), harnesses _should_ display each line
 of the `output` field as it arrives rather than waiting for the `...`
 marker. This enables real-time observation of test output in terminal
 and CI environments.
@@ -82,10 +80,9 @@ timing of display differs.
 A build step that compiles, then runs tests. The `output` field's
 content is flushed line-by-line as the build progresses:
 
-```tap
-CRAP version 2
-pragma +streamed-output
-1..2
+```crap-2
+CRAP-2
+1::2
 ok 1 - build
   ---
   output: |
@@ -119,21 +116,22 @@ which are typically short values written atomically.
 
 ### Backwards Compatibility
 
-Harnesses that do not recognize the `streamed-output` pragma _must_
-ignore it, per the CRAP-2 specification's pragma rules. The YAML
-diagnostic block is structurally identical with or without the pragma —
-it is valid CRAP-2 in both cases. The only difference is whether the
-harness displays output lines as they arrive or after the block closes.
+The YAML diagnostic block is structurally identical whether streamed
+output is active or disabled — it is valid CRAP-2 in both cases. The
+only difference is whether the harness displays output lines as they
+arrive or after the block closes. Harnesses that do not support
+incremental display will naturally buffer the block with no ill effect.
 
 ### Subtests
 
-In a subtest, `pragma +streamed-output` applies only to that subtest's
+In a subtest, the streamed output feature applies only to that subtest's
 document, consistent with CRAP-2's rule that subtest pragmas do not
-affect parent document parsing.
+affect parent document parsing. A subtest may disable the feature with
+`pragma -streamed-output`.
 
-A parent document's `streamed-output` pragma does not automatically
-apply to child subtests. Subtests that want streamed output _must_ emit
-their own `pragma +streamed-output`.
+The parent document's streamed output state does not automatically apply
+to child subtests — each subtest inherits the default (enabled) state
+independently.
 
 ### Interaction with ANSI in YAML Output Blocks
 

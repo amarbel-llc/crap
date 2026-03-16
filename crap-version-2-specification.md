@@ -39,7 +39,9 @@ reasonably interpret the output of TAP13 Producers.
 The following changes have been made to the specification, which
 are covered in much more detail below.
 
-* Change CRAP version line to `2`.
+* Change version line to `CRAP-2`.
+* Change plan delimiter from `..` to `::` (e.g., `1::10` instead of `1..10`).
+* Add `# WARN` directive alongside `# SKIP` and `# TODO`.
 * Add child tests as 4-space indented CRAP streams, with a
   trailing test point and leading comment line.
 * Formalize the following conventions:
@@ -56,11 +58,11 @@ CRAP-2's general grammar is:
 
 ```ebnf
 CRAPDocument := Version Plan Body | Version Body Plan
-Version     := "CRAP version 2\n"
-Plan        := "1.." (Number) (" # " Reason)? "\n"
+Version     := "CRAP-2\n"
+Plan        := "1::" (Number) (" # " Reason)? "\n"
 Body        := (TestPoint | BailOut | Pragma | Comment | Anything | Empty | Subtest)*
 TestPoint   := ("not ")? "ok" (" " Number)? ((" -")? (" " Description) )? (" " Directive)? "\n" (YAMLBlock)?
-Directive   := " # " ("todo" | "skip") (" " Reason)?
+Directive   := " # " ("todo" | "skip" | "warn") (" " Reason)?
 YAMLBlock   := "  ---\n" (YAMLLine)* "  ...\n"
 YAMLLine    := "  " (YAML)* "\n"
 BailOut     := "Bail out!" (" " Reason)? "\n"
@@ -77,7 +79,7 @@ Note that the above is intended as a rough "pseudocode" guidance for
 humans.  It is not strict EBNF.  Detailed parsing instructions for each
 element can be found in the sections below.
 
-The Version is the line `CRAP version 2`.
+The Version is the line `CRAP-2`.
 
 The Body is a collection of lines representing a test set.
 
@@ -88,9 +90,9 @@ CRAP Document.  It is a CRAP Document where each line is indented by 4 spaces.
 
 For example, a test file's output might look like:
 
-```tap
-CRAP version 2
-1..4
+```crap-2
+CRAP-2
+1::4
 ok 1 - Input file opened
 not ok 2 - First line of the input valid
   ---
@@ -157,8 +159,8 @@ backwards compatibility.
 
 To indicate that this is CRAP-2 the first line _must_ be
 
-```tap
-CRAP version 2
+```crap-2
+CRAP-2
 ```
 
 Harnesses _may_ interpret ostensibly
@@ -167,7 +169,7 @@ as CRAP-2, as this specification is compatible with observed behavior of
 existing TAP13 consumers and producers.  That is, they _may_ treat this as
 a valid Version line while parsing CRAP-2:
 
-```tap
+```crap-2
 TAP version 13
 ```
 
@@ -186,8 +188,8 @@ A Harness _must_ treat a CRAP stream lacking a plan as a failed test.
 
 The Plan specifies how many test points are to follow. For example,
 
-```tap
-1..10
+```crap-2
+1::10
 ```
 
 means that either 10 test points will follow, or 10 test points are
@@ -202,17 +204,17 @@ stream.  It can also optionally contain a comment/reason prefixed by a `#`.
 Its basic grammar is:
 
 ```ebnf
-Plan := "1.." Number ("" | "# " Reason)
+Plan := "1::" Number ("" | "# " Reason)
 ```
 
-A plan line of `1..0` indicates that the test set was completely skipped;
+A plan line of `1::0` indicates that the test set was completely skipped;
 no tests are expected to follow, and none should have come before.
-Harnesses _should_ report on `1..0` test runs similarly to their handling
+Harnesses _should_ report on `1::0` test runs similarly to their handling
 of `SKIP` Test Points, treating any comment in the Plan as the reason for
 skipping.
 
-```tap
-1..0 # WWW::Mechanize not installed
+```crap-2
+1::0 # WWW::Mechanize not installed
 ```
 
 Previous versions of CRAP allowed plans to specify any two numbers, for
@@ -258,8 +260,8 @@ until the script supplies test numbers again.
 
 For example, the following test output is acceptable:
 
-```tap
-1..5
+```crap-2
+1::5
 not ok
 ok
 not ok
@@ -269,8 +271,8 @@ ok
 
 and is equivalent to:
 
-```tap
-1..5
+```crap-2
+1::5
 not ok 1
 ok 2
 not ok 3
@@ -280,9 +282,9 @@ ok 5
 
 This test output is _not_ a successful test run:
 
-```tap
-CRAP version 2
-1..6
+```crap-2
+CRAP-2
+1::6
 not ok
 ok
 not ok
@@ -304,9 +306,9 @@ provided _must_ be within the range described by the Plan.
 
 This is valid CRAP and a successful test run:
 
-```tap
-CRAP version 2
-1..3
+```crap-2
+CRAP-2
+1::3
 ok 2
 ok 3
 ok 1
@@ -315,9 +317,9 @@ ok 1
 This is not a successful test run. Even though there are 3 Test Points,
 the Test Point ID 4 is outside the stated Plan range.
 
-```tap
-CRAP version 2
-1..3
+```crap-2
+CRAP-2
+1::3
 ok 2
 ok 4
 ok 1
@@ -332,7 +334,7 @@ _must not_ treat a Test Point with a re-used ID as a non-CRAP line.
 Any text after the test number but before a `#` is the description of
 the test point.
 
-```tap
+```crap-2
 ok 42 - this is the description of the test
 ```
 
@@ -344,7 +346,7 @@ identically whether the description starts with `" - "` or not.
 For example, these two test points _must_ be treated identically by a
 Harness:
 
-```tap
+```crap-2
 ok 1 this is fine
 ok 1 - this is fine
 ```
@@ -355,8 +357,8 @@ description reported to a user.
 #### Directive
 
 Directives are special notes that follow the first unescaped `#` on the
-Test Point line that is preceded and followed by whitespace.  Only two are
-currently defined: `TODO` and `SKIP`.
+Test Point line that is preceded and followed by whitespace.  Three are
+currently defined: `TODO`, `SKIP`, and `WARN`.
 
 Directives are not case sensitive.  That is, Harnesses _must_ treat `#
 SKIP`, `# skip`, and `# SkIp` identically.
@@ -397,8 +399,8 @@ necessary for backwards compatibility with existing CRAP producers.
 
 For example:
 
-```tap
-CRAP version 2
+```crap-2
+CRAP-2
 
 # MUST be treated as a SKIP test
 ok 1 - must be skipped test # SKIP
@@ -416,13 +418,13 @@ ok 5 - may skip, but should warn#skip
 
 For backwards compatibility with earlier incarnations of CRAP, Harnesses
 _must_ accept additional non-whitespace characters following the
-literal strings `"SKIP"` or `"TODO"`.  Everything after `(TODO|SKIP)\S*\s+`
+literal strings `"SKIP"` or `"TODO"`.  Everything after `(TODO|SKIP|WARN)\S*\s+`
 is the reason.  For example, this is supported, and shows a test with 2
 `skip` tests: one with no reason given, and the other with an explanation.
 
-```tap
-CRAP version 2
-1..2
+```crap-2
+CRAP-2
+1::2
 
 # skip: true
 ok 1 - do it later # Skipped
@@ -441,15 +443,15 @@ may drop support for `\S*` characters following directive names.
 Thus, the regular expression for directives is:
 
 ```
-/\s+#\s*(SKIP|TODO)\S*\s+([^\n]*)/
+/\s+#\s*(SKIP|TODO|WARN)\S*\s+([^\n]*)/
 directive type = $1
 reason = $2
 ```
 
 More examples of parsing directives:
 
-```tap
-CRAP version 2
+```crap-2
+CRAP-2
 
 # skip: true
 # skip reason: "this test is skipped"
@@ -471,7 +473,7 @@ ok 3 - #SkIp case insensitive, so this is skipped
 If the directive starts with `# TODO`, the test is counted as a todo test,
 and any text after `TODO\S*\s+` is the explanation.
 
-```tap
+```crap-2
 not ok 14 # TODO bend space and time
 ```
 
@@ -494,7 +496,7 @@ needing work, if that is appropriate for their use case.
 If the directive starts with `# SKIP`, the test is counted as a skipped
 test, and the text after `SKIP\S*\s+` is the explanation.
 
-```tap
+```crap-2
 ok 14 - mung the gums # SKIP leave gums unmunged for now
 ```
 
@@ -506,6 +508,31 @@ Harnesses _must not_ treat failing `SKIP` test points as a test failure.
 
 Harnesses _should_ report `SKIP` test points found as a list of items that
 were not tested, if that is appropriate for their use case.
+
+##### `WARN` tests
+
+If the directive starts with `# WARN`, the test is counted as a warned
+test, and the text after `WARN\S*\s+` is the explanation.
+
+```crap-2
+ok 7 - database query # WARN took 3.2s, exceeds 1s threshold
+```
+
+If the WARN has an explanation, it must be separated from WARN by a space.
+These tests indicate that a test passed (or failed) but with a caveat that
+deserves attention. Unlike `TODO` and `SKIP`, the `WARN` directive does
+not alter the pass/fail semantics of the test point — a `not ok` test
+with `# WARN` is still a failure, and an `ok` test with `# WARN` is still
+a success.
+
+Harnesses _must not_ change the pass/fail status of a test point based on
+the presence of a `WARN` directive.
+
+Harnesses _should_ report `WARN` test points prominently, for example as
+a separate list of warnings in the test summary. When outputting to a
+terminal, harnesses _should_ display the `# WARN` directive using ANSI
+SGR yellow (SGR 33), consistent with the ANSI Display Hints amendment's
+treatment of `# SKIP` and `# TODO`.
 
 ### YAML Diagnostics
 
@@ -520,7 +547,7 @@ preceding Test Point.
 
 For example:
 
-```tap
+```crap-2
 not ok 3 - Resolve address
   ---
   message: "Failed with error 'hostname peebles.example.com not found'"
@@ -579,13 +606,16 @@ disabled.
 
 Pragma lines in CRAP-2 are therefore primarily used to _disable_ features:
 
-```tap
-CRAP version 2
+```crap-2
+CRAP-2
 # disable ANSI display hints for this stream
 pragma -color
 
 # disable the status line
 pragma -status-line
+
+# disable streamed output
+pragma -streamed-output
 ```
 
 Producers _may_ still emit `pragma +<key>` lines for clarity, but harnesses
@@ -598,8 +628,8 @@ explicitly enabled with `pragma +<key>` if desired.
 
 For example:
 
-```tap
-CRAP version 2
+```crap-2
+CRAP-2
 # tell the parser to bail out on any failures from now on
 pragma +bail
 
@@ -643,14 +673,14 @@ As an emergency measure a test script can decide that further tests are
 useless (e.g. missing dependencies) and testing should stop immediately. In
 that case the test script prints the magic words
 
-```tap
+```crap-2
 Bail out!
 ```
 
 to standard output. Any message after these words _must_ be presented by
 the Harness as the reason why testing must be stopped.  For example:
 
-```tap
+```crap-2
 Bail out! MySQL is not running.
 ```
 
@@ -658,7 +688,7 @@ Bail out! MySQL is not running.
 _should_ be unescaped prior to being presented to the user.  See
 "Escaping" below.
 
-```tap
+```crap-2
 # reason for stopping: # and \ are not supported
 Bail out! \# and \\ are not supported
 ```
@@ -719,8 +749,8 @@ not normative, and shown for illustration purposes only.  Harnesses
 _should_ present this data to their consumers in whatever manner is
 appropriate for their language and context.
 
-```tap
-CRAP version 2
+```crap-2
+CRAP-2
 
 # description: hello
 # todo: true
@@ -754,7 +784,7 @@ ok 7 - hello # description # todo
 # todo: false
 ok 8 - hello \\\\\\\# todo
 
-1..8
+1::8
 ```
 
 ## Subtests
@@ -765,12 +795,12 @@ useful in a variety of situations.  For example:
 1. A Harness parses a collection of CRAP documents, providing output which
    is also in CRAP format.
 
-    ```tap
-    CRAP version 2
-    1..2
+    ```crap-2
+    CRAP-2
+    1::2
 
     # Subtest: foo.tap
-        1..2
+        1::2
         ok 1
         ok 2 - this passed
     ok 1 - foo.tap
@@ -787,7 +817,7 @@ useful in a variety of situations.  For example:
             column: 8
           ...
         ok 3 - object can bar bears # TODO
-        1..3
+        1::3
     not ok 2 - bar.tap
       ---
       fail: 1
@@ -810,15 +840,15 @@ useful in a variety of situations.  For example:
 
     which produces the output:
 
-    ```tap
-    CRAP version 2
+    ```crap-2
+    CRAP-2
     ok 1 - true is ok
     # Subtest: this is a subtest
         ok 1 - this is fine
         not ok 2 - this is not fine
-        1..2
+        1::2
     not ok 2 - this is a subtest
-    1..2
+    1::2
     ```
 
 Subtests are designed with graceful fallback for TAP13 harnesses in mind.
@@ -842,12 +872,12 @@ supported) Pragma, prefixed by 4 space characters.
 
 For example:
 
-```tap
-CRAP version 2
+```crap-2
+CRAP-2
     ok 1 - subtest test point
-    1..1
+    1::1
 ok 1 - subtest passing
-1..1
+1::1
 ```
 
 Note that, because the Version is optional in subtests, and the plan may
@@ -855,14 +885,14 @@ occur after all test points, the first item in a subtest may be a further
 subtest.  Harnesses must thus treat any multiple of 4-space indentation is
 multiple levels of nested subtest:
 
-```tap
-CRAP version 2
+```crap-2
+CRAP-2
         ok 1 - nested twice
-        1..1
+        1::1
     ok 1 - nested parent
-    1..1
+    1::1
 ok 1 - double nest passing
-1..1
+1::1
 ```
 
 The first test point at the parent level is the correlated Test Point for
@@ -877,13 +907,13 @@ Point.
 This comment has the form `^# Subtest(: .*)$`.  Everything after the `: `
 is the Subtest Name.  For example:
 
-```tap
+```crap-2
 # Subtest: <name>
 ```
 
 or
 
-```tap
+```crap-2
 # Subtest
 ```
 
@@ -893,46 +923,46 @@ terminating Test Point _must not_ include a description.
 
 For example:
 
-```tap
-CRAP version 2
+```crap-2
+CRAP-2
 
 ok 1 - in the parent
 
 # Subtest: nested
-    1..1
+    1::1
     ok 1 - in the subtest
 ok 2 - nested
 
 # Subtest: empty
-    1..0
+    1::0
 ok 3 - empty
 
 # Subtest
     ok 1 - name is optional
-    1..1
+    1::1
 ok 4
 
-1..4
+1::4
 ```
 
 Commented Subtests are encouraged, as they provide the following benefits:
 
 * Easier for humans to read.  For example:
 
-    ```tap
-    CRAP version 2
-                1..1
+    ```crap-2
+    CRAP-2
+                1::1
                 ok 1 - hmm, what level is this?
     ```
 
     vs:
 
-    ```tap
-    CRAP version 2
+    ```crap-2
+    CRAP-2
     # Subtest: level 1
         # Subtest: level 2
             # Subtest: level 3
-                1..1
+                1::1
                 ok 1 - clearly level 3
     ```
 
@@ -957,16 +987,16 @@ of the parser with respect to the parent CRAP Document.
 For example, given a Harness where a `strict` Pragma will cause it to treat
 any non-CRAP as an error:
 
-```tap
-CRAP version 2
+```crap-2
+CRAP-2
 pragma -strict
 # Subtest: child test
-    1..1
+    1::1
     pragma +strict
     ok 1
 ok 1 - child test
 !!This is not valid CRAP content!!
-1..1
+1::1
 ```
 
 In this CRAP document, the non-CRAP content _must not_ be treated as a test
@@ -976,7 +1006,7 @@ failure, because the `strict` Pragma setting at the parent level was false.
 
 1. The subtest CRAP document is indented 4 spaces.
 2. Subtests _must_ be a valid CRAP document, meaning that they cannot be
-   entirely empty.  At minimum, they must include a `1..0` line to indicate
+   entirely empty.  At minimum, they must include a `1::0` line to indicate
    that no Test Points are expected.  This implies the following:
     1. Subtests can be nested within subtests by indenting another 4
        characters for each level of nesting.
@@ -1024,20 +1054,23 @@ CRAP-2 is a fork of TAP-14 and its wire format is intentionally close to
 TAP-14. A conformant CRAP-2 stream can be mechanically reformatted to a
 valid TAP-14 stream by:
 
-1. Replacing the version line `CRAP version 2` with `TAP version 14`.
-2. Inserting explicit `pragma +<key>` lines for any CRAP-2 features that
+1. Replacing the version line `CRAP-2` with `TAP version 14`.
+2. Converting plan lines from `1::N` to `1..N`.
+3. Converting any `# WARN` directives to comments or test point
+   descriptions, as TAP-14 does not define the `WARN` directive.
+4. Inserting explicit `pragma +<key>` lines for any CRAP-2 features that
    are enabled by default but require opt-in under TAP-14 (e.g., color,
-   status-line).
-3. Leaving all other lines unchanged — test points, plans, YAML
-   diagnostics, comments, subtests, and bail outs are wire-compatible.
+   status-line, streamed-output).
+5. Leaving all other lines unchanged — test points, YAML diagnostics,
+   comments, subtests, and bail outs are wire-compatible.
 
 Producers _may_ offer a TAP-14 output mode that performs this
 transformation. Harnesses that consume TAP-14 _should_ be able to parse
 CRAP-2 output after this reformatting step.
 
 Similarly, a TAP-14 stream can be reformatted to CRAP-2 by replacing the
-version line and removing any `pragma +` lines for features that CRAP-2
-enables by default.
+version line, converting plan lines from `1..N` to `1::N`, and removing
+any `pragma +` lines for features that CRAP-2 enables by default.
 
 ------
 
@@ -1054,9 +1087,9 @@ The following CRAP listing declares that six tests follow as well as
 provides handy feedback as to what the test is about to do. All six tests
 pass.
 
-```tap
-CRAP version 2
-1..6
+```crap-2
+CRAP-2
+1::6
 #
 # Create a new Board and Tile, then place
 # the Tile onto the board.
@@ -1079,8 +1112,8 @@ have run. Also, two of the tests fail. The YAML block following each
 failure gives additional information about the failure that may be
 displayed by the harness.
 
-```tap
-CRAP version 2
+```crap-2
+CRAP-2
 ok 1 - retrieving servers from the database
 # need to ping 6 servers
 ok 2 - pinged diamond
@@ -1097,7 +1130,7 @@ not ok 6 - pinged quartz
   severity: fail
   ...
 ok 7 - pinged gold
-1..7
+1::7
 ```
 
 ### Giving up
@@ -1107,9 +1140,9 @@ first test fails, reportedly because a connection to the database could not
 be established. The program decided that continuing was pointless and
 exited.
 
-```tap
-CRAP version 2
-1..573
+```crap-2
+CRAP-2
+1::573
 not ok 1 - database handle
 Bail out! Couldn't connect to database.
 ```
@@ -1120,9 +1153,9 @@ The following listing plans on running 5 tests. However, our program
 decided to not run tests 2 thru 5 at all. To properly report this, the
 tests are marked as being skipped.
 
-```tap
-CRAP version 2
-1..5
+```crap-2
+CRAP-2
+1::5
 ok 1 - approved operating system
 # $^0 is solaris
 ok 2 - # SKIP no /sys directory
@@ -1135,9 +1168,9 @@ ok 5 - # SKIP no /sys directory
 
 This listing shows that the entire listing is a skip. No tests were run.
 
-```tap
-CRAP version 2
-1..0 # skip because English-to-French translator isn't installed
+```crap-2
+CRAP-2
+1::0 # skip because English-to-French translator isn't installed
 ```
 
 ## Procrastination Considered `ok`
@@ -1147,9 +1180,9 @@ tests failed. However, because the failing tests are marked as things to do
 later, they are considered successes. Thus, a harness should report this
 entire listing as a success.
 
-```tap
-CRAP version 2
-1..4
+```crap-2
+CRAP-2
+1::4
 ok 1 - Creating test program
 ok 2 - Test program runs, no error
 not ok 3 - infinite loop # TODO halting problem unsolved
@@ -1162,8 +1195,8 @@ This listing shows an alternate output where the test numbers aren't
 provided. The test also reports the state of a ficticious board game as a
 YAML block. Finally, the test count is reported at the end.
 
-```tap
-CRAP version 2
+```crap-2
+CRAP-2
 ok - created Board
 ok
 ok
@@ -1188,7 +1221,7 @@ ok
        - '        G     R     G        '
   ...
 ok - board has 7 tiles + starter tile
-1..9
+1::9
 ```
 
 ## Bugs

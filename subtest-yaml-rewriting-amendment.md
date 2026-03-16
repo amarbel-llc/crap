@@ -13,7 +13,7 @@ CRAP-2 subtests are indented CRAP documents nested inside a parent document.
 A subtest's YAML diagnostic block may itself contain a CRAP document — for
 example, when a test point captures the output of a child process that
 produces CRAP. If that YAML block's value begins with a CRAP version line
-(e.g., `CRAP version 2`), the embedded document is a complete CRAP stream,
+(e.g., `CRAP-2`), the embedded document is a complete CRAP stream,
 but the harness has no mechanism to interpret its test points as part of
 the subtest hierarchy.
 
@@ -47,7 +47,7 @@ following are true:
 1. The block is attached to a test point within a subtest (i.e., at any
    indentation level greater than 0).
 2. The block contains a field whose block scalar value begins with a
-   valid CRAP version line (`CRAP version 2`).
+   valid CRAP version line (`CRAP-2`).
 
 Harnesses MAY check any field name, but the `output` field is the most
 common location for captured CRAP output. Harnesses SHOULD document which
@@ -93,16 +93,16 @@ the YAML block as opaque diagnostic data, per standard CRAP-2 behavior.
 A test runner executes a child process that produces CRAP. The producer
 captures the child's output in a YAML diagnostic block:
 
-```tap
-CRAP version 2
-1..1
+```crap-2
+CRAP-2
+1::1
 # Subtest: integration suite
-    1..1
+    1::1
     ok 1 - child process
       ---
       output: |
-        CRAP version 2
-        1..2
+        CRAP-2
+        1::2
         ok 1 - database connects
         not ok 2 - query returns results
       ...
@@ -112,13 +112,13 @@ ok 1 - integration suite
 A harness implementing this amendment MAY rewrite the document so the
 embedded CRAP output appears as a nested subtest:
 
-```tap
-CRAP version 2
-1..1
+```crap-2
+CRAP-2
+1::1
 # Subtest: integration suite
-    1..1
+    1::1
     # Subtest: child process
-        1..2
+        1::2
         ok 1 - database connects
         not ok 2 - query returns results
     ok 1 - child process

@@ -146,9 +146,9 @@ the handling of ANSI sequences within its values.
 A YAML diagnostic block with colored diff output as it appears on a
 terminal (SGR sequences shown in `\033[...m` notation):
 
-```tap
-CRAP version 2
-1..1
+```crap-2
+CRAP-2
+1::1
 not ok 1 - output matches expected
   ---
   message: "output differs from expected"
@@ -168,9 +168,9 @@ not ok 1 - output matches expected
 After ANSI stripping by a harness writing to a log file, this is
 equivalent to:
 
-```tap
-CRAP version 2
-1..1
+```crap-2
+CRAP-2
+1::1
 not ok 1 - output matches expected
   ---
   message: "output differs from expected"

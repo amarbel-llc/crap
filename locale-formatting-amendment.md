@@ -10,10 +10,10 @@ title: "CRAP-2 Amendment: Locale Number Formatting"
 ## Problem
 
 CRAP-2 uses plain ASCII integers for test point IDs and plan counts.
-When test suites grow large, numbers like `1..10000` or `ok 9999` are
+When test suites grow large, numbers like `1::10000` or `ok 9999` are
 hard to read at a glance. Many locales use grouping separators to
-improve readability of large numbers — `1..10,000` (en-US),
-`1..10.000` (de-DE), `1..10 000` (fr-FR) — but CRAP-2 has no
+improve readability of large numbers — `1::10,000` (en-US),
+`1::10.000` (de-DE), `1::10 000` (fr-FR) — but CRAP-2 has no
 mechanism to signal that these formats are in use.
 
 Without an explicit locale declaration, harnesses cannot distinguish
@@ -33,7 +33,7 @@ document are to be interpreted as described in RFC 2119.
 
 The pragma is activated with a BCP 47 language tag:
 
-```tap
+```crap-2
 pragma +locale-formatting:de-DE
 ```
 
@@ -61,7 +61,7 @@ When active, the following positions MAY contain locale-formatted
 integers:
 
 - **Test point IDs**: `ok 1,234` (en-US), `ok 1.234` (de-DE)
-- **Plan counts**: `1..10,000` (en-US), `1..10.000` (de-DE)
+- **Plan counts**: `1::10,000` (en-US), `1::10.000` (de-DE)
 
 The formatted numbers MUST represent the same integer value as their
 plain ASCII equivalent. Grouping separators are purely cosmetic and
@@ -100,10 +100,10 @@ locale throughout the document.
 
 ### Example
 
-```tap
-CRAP version 2
+```crap-2
+CRAP-2
 pragma +locale-formatting:en-US
-1..1,200
+1::1,200
 ok 1 - initial setup
 ok 2 - database connection
 # ...
@@ -112,14 +112,14 @@ ok 1,200 - final teardown
 ```
 
 After stripping grouping separators, a harness interprets this as
-`1..1200` with test points 1 through 1200.
+`1::1200` with test points 1 through 1200.
 
 A German-locale example:
 
-```tap
-CRAP version 2
+```crap-2
+CRAP-2
 pragma +locale-formatting:de-DE
-1..1.200
+1::1.200
 ok 1 - Ersteinrichtung
 ok 2 - Datenbankverbindung
 # ...

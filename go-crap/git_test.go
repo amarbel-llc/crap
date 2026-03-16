@@ -3,6 +3,9 @@ package crap
 import (
 	"bytes"
 	"context"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -126,6 +129,77 @@ func TestGitPhaseParserSkipsEmptyPhases(t *testing.T) {
 
 	if phases[0].Name != "merge" {
 		t.Errorf("phase name = %q, want %q", phases[0].Name, "merge")
+	}
+}
+
+func TestFindGitSkipsSelf(t *testing.T) {
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("git not in PATH")
+	}
+
+	// When selfExe is something other than git, FindGit should find git normally
+	result, err := FindGit("/some/other/binary")
+	if err != nil {
+		t.Fatalf("FindGit failed: %v", err)
+	}
+
+	realResolved, _ := filepath.EvalSymlinks(realGit)
+	resultResolved, _ := filepath.EvalSymlinks(result)
+	if resultResolved != realResolved {
+		t.Errorf("FindGit = %q, want %q", resultResolved, realResolved)
+	}
+}
+
+func TestFindGitDetectsRecursion(t *testing.T) {
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("git not in PATH")
+	}
+
+	// Create a temp dir with a symlink named "git" pointing to the real git
+	tmpDir := t.TempDir()
+	fakeGit := filepath.Join(tmpDir, "git")
+	if err := os.Symlink(realGit, fakeGit); err != nil {
+		t.Fatalf("failed to create symlink: %v", err)
+	}
+
+	// Set PATH to only our temp dir — FindGit with selfExe=realGit should
+	// skip the symlink since it resolves to the same file
+	t.Setenv("PATH", tmpDir)
+	_, err = FindGit(realGit)
+	if err == nil {
+		t.Error("expected error when all git candidates resolve to selfExe")
+	}
+}
+
+func TestFindGitSelectsNextCandidate(t *testing.T) {
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("git not in PATH")
+	}
+	realGitDir := filepath.Dir(realGit)
+
+	// Create a temp dir with a standalone executable named "git" that is NOT
+	// the real git (simulates ::git renamed to "git").
+	tmpDir := t.TempDir()
+	fakeGit := filepath.Join(tmpDir, "git")
+	if err := os.WriteFile(fakeGit, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("failed to create fake git: %v", err)
+	}
+
+	// PATH has our fake dir first, then the real git dir.
+	// FindGit with selfExe=fakeGit should skip the fake one and find the real one.
+	t.Setenv("PATH", tmpDir+string(os.PathListSeparator)+realGitDir)
+	result, err := FindGit(fakeGit)
+	if err != nil {
+		t.Fatalf("FindGit failed: %v", err)
+	}
+
+	resultResolved, _ := filepath.EvalSymlinks(result)
+	realResolved, _ := filepath.EvalSymlinks(realGit)
+	if resultResolved != realResolved {
+		t.Errorf("FindGit = %q, want %q", resultResolved, realResolved)
 	}
 }
 
@@ -259,7 +333,7 @@ func TestEmitGitGenericFailure(t *testing.T) {
 func TestConvertGitGenericSuccess(t *testing.T) {
 	var buf bytes.Buffer
 	exitCode := ConvertGit(
-		context.Background(), []string{"version"},
+		context.Background(), os.Args[0], []string{"version"},
 		&buf, false, false,
 	)
 
@@ -282,7 +356,7 @@ func TestConvertGitGenericSuccess(t *testing.T) {
 func TestConvertGitGenericFailure(t *testing.T) {
 	var buf bytes.Buffer
 	exitCode := ConvertGit(
-		context.Background(), []string{"clone", "--bad-flag-that-does-not-exist"},
+		context.Background(), os.Args[0], []string{"clone", "--bad-flag-that-does-not-exist"},
 		&buf, false, false,
 	)
 

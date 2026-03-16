@@ -5,7 +5,9 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -79,6 +81,40 @@ func (p *GitPhaseParser) Phases() []GitPhase {
 	return result
 }
 
+// FindGit searches $PATH for a "git" binary that is not the same file as
+// selfExe. This prevents infinite recursion when a user symlinks or renames
+// ::git to "git". Returns the absolute path to git, or an error if no
+// suitable git is found.
+func FindGit(selfExe string) (string, error) {
+	selfResolved, err := filepath.EvalSymlinks(selfExe)
+	if err != nil {
+		selfResolved = selfExe
+	}
+
+	pathEnv := os.Getenv("PATH")
+	if pathEnv == "" {
+		return "", fmt.Errorf("git not found: PATH is empty")
+	}
+
+	for _, dir := range filepath.SplitList(pathEnv) {
+		candidate := filepath.Join(dir, "git")
+		info, err := os.Stat(candidate)
+		if err != nil || info.IsDir() {
+			continue
+		}
+		candidateResolved, err := filepath.EvalSymlinks(candidate)
+		if err != nil {
+			candidateResolved = candidate
+		}
+		if candidateResolved == selfResolved {
+			continue
+		}
+		return candidate, nil
+	}
+
+	return "", fmt.Errorf("git not found in PATH (all candidates resolve to %s)", selfResolved)
+}
+
 // parserForSubcommand returns a phase parser for recognized git subcommands,
 // or nil for generic fallback.
 func parserForSubcommand(args []string) *GitPhaseParser {
@@ -98,15 +134,23 @@ func parserForSubcommand(args []string) *GitPhaseParser {
 // ConvertGit runs git with args and writes CRAP-2 output. For recognized
 // subcommands (pull, push) it emits semantic phase test points. For all
 // others it emits a single test point based on exit code.
+// selfExe is the path to the running binary, used to avoid exec recursion
+// when the user renames ::git to "git".
 // Returns the git exit code.
-func ConvertGit(ctx context.Context, args []string, w io.Writer, verbose bool, color bool) int {
+func ConvertGit(ctx context.Context, selfExe string, args []string, w io.Writer, verbose bool, color bool) int {
 	tw := NewColorWriter(w, color)
 	if color {
 		tw.EnableTTYBuildLastLine()
 	}
 	spinner := newStatusSpinner()
 
-	cmd := exec.CommandContext(ctx, "git", args...)
+	gitPath, err := FindGit(selfExe)
+	if err != nil {
+		tw.BailOut(err.Error())
+		return 1
+	}
+
+	cmd := exec.CommandContext(ctx, gitPath, args...)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

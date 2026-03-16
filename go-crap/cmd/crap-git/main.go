@@ -20,8 +20,14 @@ func main() {
 		os.Exit(1)
 	}
 
+	selfExe, err := os.Executable()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "::git: failed to resolve own executable: %v\n", err)
+		os.Exit(1)
+	}
+
 	color := stdoutIsTerminal()
-	exitCode := crap.ConvertGit(ctx, os.Args[1:], os.Stdout, false, color)
+	exitCode := crap.ConvertGit(ctx, selfExe, os.Args[1:], os.Stdout, false, color)
 	if exitCode != 0 {
 		os.Exit(exitCode)
 	}

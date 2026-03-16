@@ -7,13 +7,17 @@ build: build-nix
 build-nix:
     nix build --show-trace
 
-test: test-go test-cargo
+test: test-go test-cargo test-bats
 
 test-go:
     cd go-crap && nix develop ../ --command go test ./...
 
 test-cargo:
     nix develop --command cargo test --manifest-path rust-crap/Cargo.toml
+
+test-bats:
+    nix build --show-trace
+    LARGE_COLON_BIN=result/bin/large-colon bats --no-sandbox --tap tests/
 
 run-nix *ARGS:
     nix run . -- {{ARGS}}

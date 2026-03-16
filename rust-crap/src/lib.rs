@@ -123,6 +123,8 @@ impl<'a> CrapWriterBuilder<'a> {
             counter: 0,
             failed: false,
             plan_emitted: false,
+            status_line_active: false,
+            status_processor: None,
             config,
         })
     }
@@ -134,6 +136,8 @@ impl<'a> CrapWriterBuilder<'a> {
             counter: 0,
             failed: false,
             plan_emitted: false,
+            status_line_active: false,
+            status_processor: None,
             config,
         })
     }
@@ -190,11 +194,64 @@ pub struct TestResult {
     pub suppress_yaml: bool,
 }
 
+/// Processes raw byte chunks from PTY output into clean status lines.
+///
+/// Splits on `\r` and `\n`, trims whitespace, and filters out lines
+/// that contain only ANSI escape sequences or whitespace. Buffers
+/// partial lines across `feed()` calls.
+pub struct StatusLineProcessor {
+    buf: Vec<u8>,
+}
+
+impl Default for StatusLineProcessor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl StatusLineProcessor {
+    pub fn new() -> Self {
+        Self { buf: Vec::new() }
+    }
+
+    pub fn feed(&mut self, chunk: &[u8]) -> StatusLineIter<'_> {
+        self.buf.extend_from_slice(chunk);
+        StatusLineIter { proc: self }
+    }
+}
+
+pub struct StatusLineIter<'a> {
+    proc: &'a mut StatusLineProcessor,
+}
+
+impl Iterator for StatusLineIter<'_> {
+    type Item = String;
+
+    fn next(&mut self) -> Option<String> {
+        loop {
+            let pos = self
+                .proc
+                .buf
+                .iter()
+                .position(|&b| b == b'\n' || b == b'\r')?;
+            let line_bytes = self.proc.buf[..pos].to_vec();
+            self.proc.buf.drain(..=pos);
+            let line = String::from_utf8_lossy(&line_bytes);
+            let trimmed = line.trim();
+            if has_visible_content(trimmed) {
+                return Some(trimmed.to_string());
+            }
+        }
+    }
+}
+
 pub struct CrapWriter<'a> {
     w: &'a mut dyn Write,
     counter: usize,
     failed: bool,
     plan_emitted: bool,
+    status_line_active: bool,
+    status_processor: Option<StatusLineProcessor>,
     pub(crate) config: CrapConfig,
 }
 
@@ -207,7 +264,15 @@ impl<'a> CrapWriter<'a> {
         self.failed
     }
 
+    fn clear_status_if_active(&mut self) -> io::Result<()> {
+        if self.status_line_active {
+            self.finish_last_line()?;
+        }
+        Ok(())
+    }
+
     pub fn ok(&mut self, desc: &str) -> io::Result<usize> {
+        self.clear_status_if_active()?;
         self.counter += 1;
         let num = self.config.format_number(self.counter);
         writeln!(
@@ -221,6 +286,7 @@ impl<'a> CrapWriter<'a> {
     }
 
     pub fn not_ok(&mut self, desc: &str) -> io::Result<usize> {
+        self.clear_status_if_active()?;
         self.counter += 1;
         self.failed = true;
         let num = self.config.format_number(self.counter);
@@ -235,6 +301,7 @@ impl<'a> CrapWriter<'a> {
     }
 
     pub fn not_ok_diag(&mut self, desc: &str, diagnostics: &[(&str, &str)]) -> io::Result<usize> {
+        self.clear_status_if_active()?;
         self.counter += 1;
         self.failed = true;
         let num = self.config.format_number(self.counter);
@@ -250,6 +317,7 @@ impl<'a> CrapWriter<'a> {
     }
 
     pub fn skip(&mut self, desc: &str, reason: &str) -> io::Result<usize> {
+        self.clear_status_if_active()?;
         self.counter += 1;
         let num = self.config.format_number(self.counter);
         writeln!(
@@ -265,6 +333,7 @@ impl<'a> CrapWriter<'a> {
     }
 
     pub fn todo(&mut self, desc: &str, reason: &str) -> io::Result<usize> {
+        self.clear_status_if_active()?;
         self.counter += 1;
         let num = self.config.format_number(self.counter);
         writeln!(
@@ -280,6 +349,7 @@ impl<'a> CrapWriter<'a> {
     }
 
     pub fn bail_out(&mut self, reason: &str) -> io::Result<()> {
+        self.clear_status_if_active()?;
         writeln!(self.w, "{} {}", token_bail_out(self.config.color()), reason)
     }
 
@@ -288,13 +358,30 @@ impl<'a> CrapWriter<'a> {
     }
 
     pub fn update_last_line(&mut self, text: &str) -> io::Result<()> {
-        write!(self.w, "\r\x1b[2K# {}", text)?;
+        if self.config.color {
+            write!(self.w, "\r\x1b[2K\x1b[?7l# {}\x1b[?7h", text)?;
+        } else {
+            write!(self.w, "\r\x1b[2K# {}", text)?;
+        }
+        self.status_line_active = true;
         self.w.flush()
     }
 
     pub fn finish_last_line(&mut self) -> io::Result<()> {
+        self.status_line_active = false;
         write!(self.w, "\r\x1b[2K")?;
         self.w.flush()
+    }
+
+    pub fn feed_status_bytes(&mut self, chunk: &[u8]) -> io::Result<()> {
+        let proc = self
+            .status_processor
+            .get_or_insert_with(StatusLineProcessor::new);
+        let lines: Vec<_> = proc.feed(chunk).collect();
+        for line in lines {
+            self.update_last_line(&line)?;
+        }
+        Ok(())
     }
 
     pub fn pragma(&mut self, key: &str, enabled: bool) -> io::Result<()> {
@@ -330,6 +417,7 @@ impl<'a> CrapWriter<'a> {
     }
 
     pub fn test_point(&mut self, result: &TestResult) -> io::Result<()> {
+        self.clear_status_if_active()?;
         self.counter += 1;
         if !result.ok {
             self.failed = true;
@@ -382,6 +470,8 @@ impl<'a> CrapWriter<'a> {
             counter: 0,
             failed: false,
             plan_emitted: false,
+            status_line_active: false,
+            status_processor: None,
             config,
         };
         if let Some(ref locale) = child.config.locale {
@@ -445,6 +535,28 @@ fn write_diagnostics_block(
     writeln!(w, "  ...")
 }
 
+/// Check whether a string has any visible content after stripping ANSI escape
+/// sequences. Returns false for strings that are only whitespace and/or
+/// control sequences (e.g. `\x1b[0m\x1b[K`).
+pub fn has_visible_content(s: &str) -> bool {
+    let mut chars = s.chars();
+    while let Some(c) = chars.next() {
+        if c == '\x1b' {
+            // Skip CSI sequence: ESC [ <params>* <intermediate>* <final 0x40-0x7E>
+            if chars.next() == Some('[') {
+                for c in chars.by_ref() {
+                    if ('@'..='~').contains(&c) {
+                        break;
+                    }
+                }
+            }
+        } else if !c.is_whitespace() && !c.is_ascii_control() {
+            return true;
+        }
+    }
+    false
+}
+
 fn strip_ansi(s: &str) -> String {
     let mut result = String::with_capacity(s.len());
     let mut chars = s.chars();
@@ -504,11 +616,16 @@ fn normalize_line_endings(s: &str) -> String {
 
 fn sanitize_yaml_value(value: &str, color: bool) -> String {
     let value = normalize_line_endings(value);
-    if color {
+    let stripped = if color {
         strip_non_sgr_csi(&value)
     } else {
         strip_ansi(&value)
-    }
+    };
+    stripped
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn write_yaml_field(
@@ -858,8 +975,7 @@ mod tests {
         let out = String::from_utf8(buf).unwrap();
         assert!(out.contains("ok 1 - build\n"));
         assert!(out.contains("  ---\n"));
-        assert!(out.contains("  output: |\n"));
-        assert!(out.contains("    building\n"));
+        assert!(out.contains("  output: \"building\"\n"));
         assert!(out.contains("  ...\n"));
     }
 
@@ -1306,6 +1422,30 @@ mod tests {
         assert!(out.contains("    world\n"));
     }
 
+    #[test]
+    fn yaml_field_filters_blank_lines() {
+        let mut buf = Vec::new();
+        write_yaml_field(&mut buf, "output", "line one\n\n\nline two\n  \nline three", false)
+            .unwrap();
+        let out = String::from_utf8(buf).unwrap();
+        assert!(out.contains("  output: |\n"));
+        assert!(out.contains("    line one\n"));
+        assert!(out.contains("    line two\n"));
+        assert!(out.contains("    line three\n"));
+        assert!(!out.contains("    \n"));
+    }
+
+    #[test]
+    fn yaml_field_single_line_after_blank_filter() {
+        let mut buf = Vec::new();
+        write_yaml_field(&mut buf, "output", "\n\nhello\n\n", false).unwrap();
+        let out = String::from_utf8(buf).unwrap();
+        // After filtering blanks, only "hello" remains — single-line format
+        assert!(out.contains("  output:"));
+        assert!(out.contains("hello"));
+        assert!(!out.contains("|\n"));
+    }
+
     // --- ANSI escape code stripping ---
 
     #[test]
@@ -1338,6 +1478,38 @@ mod tests {
         assert_eq!(strip_ansi("\x1b[31mnot ok\x1b[0m"), "not ok");
         assert_eq!(strip_ansi("\x1b[2Jafter clear"), "after clear");
         assert_eq!(strip_ansi("no escapes"), "no escapes");
+    }
+
+    // --- has_visible_content ---
+
+    #[test]
+    fn has_visible_content_plain_text() {
+        assert!(has_visible_content("hello"));
+    }
+
+    #[test]
+    fn has_visible_content_ansi_only() {
+        assert!(!has_visible_content("\x1b[0m\x1b[K"));
+    }
+
+    #[test]
+    fn has_visible_content_ansi_with_text() {
+        assert!(has_visible_content("\x1b[32mok\x1b[0m"));
+    }
+
+    #[test]
+    fn has_visible_content_whitespace_only() {
+        assert!(!has_visible_content("   \t  "));
+    }
+
+    #[test]
+    fn has_visible_content_empty() {
+        assert!(!has_visible_content(""));
+    }
+
+    #[test]
+    fn has_visible_content_control_chars_only() {
+        assert!(!has_visible_content("\x01\x02\x03"));
     }
 
     // --- Suppress YAML block mode ---
@@ -2134,6 +2306,42 @@ mod tests {
     }
 
     #[test]
+    fn update_last_line_decawm_with_color() {
+        let mut buf = Vec::new();
+        let mut tw = CrapWriterBuilder::new(&mut buf)
+            .color(true)
+            .status_line(true)
+            .build()
+            .unwrap();
+        tw.update_last_line("long line here").unwrap();
+        let out = String::from_utf8(buf).unwrap();
+        assert!(
+            out.contains("\r\x1b[2K\x1b[?7l# long line here\x1b[?7h"),
+            "expected DECAWM wrapping, got:\n{out}"
+        );
+    }
+
+    #[test]
+    fn update_last_line_no_decawm_without_color() {
+        let mut buf = Vec::new();
+        let mut tw = CrapWriterBuilder::new(&mut buf)
+            .color(false)
+            .status_line(true)
+            .build()
+            .unwrap();
+        tw.update_last_line("line").unwrap();
+        let out = String::from_utf8(buf).unwrap();
+        assert!(
+            out.contains("\r\x1b[2K# line"),
+            "expected no DECAWM wrapping without color, got:\n{out}"
+        );
+        assert!(
+            !out.contains("\x1b[?7l"),
+            "should not contain DECAWM disable without color"
+        );
+    }
+
+    #[test]
     fn writer_subtest_does_not_inherit_status_line() {
         let mut buf = Vec::new();
         let mut tw = CrapWriterBuilder::new(&mut buf)
@@ -2152,6 +2360,144 @@ mod tests {
             !out.contains(indented_pragma),
             "subtest should not inherit status-line, got:\n{out}"
         );
+    }
+
+    // --- Auto-clear before test points ---
+
+    #[test]
+    fn test_point_auto_clears_status_line() {
+        let mut buf = Vec::new();
+        let mut tw = CrapWriterBuilder::new(&mut buf)
+            .status_line(true)
+            .build()
+            .unwrap();
+        tw.update_last_line("building...").unwrap();
+        let result = TestResult {
+            number: 1,
+            name: "build".into(),
+            ok: true,
+            directive: None,
+            error_message: None,
+            exit_code: None,
+            output: None,
+            suppress_yaml: false,
+        };
+        tw.test_point(&result).unwrap();
+        let out = String::from_utf8(buf).unwrap();
+        let ok_pos = out.rfind("ok 1 - build").unwrap();
+        let clear_before = &out[..ok_pos];
+        assert!(
+            clear_before.ends_with("\r\x1b[2K"),
+            "test_point should auto-clear status line, got:\n{out}"
+        );
+    }
+
+    #[test]
+    fn test_point_no_clear_without_active_status() {
+        let mut buf = Vec::new();
+        let mut tw = CrapWriterBuilder::new(&mut buf).build().unwrap();
+        let result = TestResult {
+            number: 1,
+            name: "build".into(),
+            ok: true,
+            directive: None,
+            error_message: None,
+            exit_code: None,
+            output: None,
+            suppress_yaml: false,
+        };
+        tw.test_point(&result).unwrap();
+        let out = String::from_utf8(buf).unwrap();
+        assert!(
+            !out.contains("\r\x1b[2K"),
+            "should not emit clear when no status line active, got:\n{out}"
+        );
+    }
+
+    #[test]
+    fn ok_auto_clears_status_line() {
+        let mut buf = Vec::new();
+        let mut tw = CrapWriterBuilder::new(&mut buf)
+            .status_line(true)
+            .build()
+            .unwrap();
+        tw.update_last_line("compiling...").unwrap();
+        tw.ok("compile").unwrap();
+        let out = String::from_utf8(buf).unwrap();
+        let ok_pos = out.rfind("ok 1 - compile").unwrap();
+        let clear_before = &out[..ok_pos];
+        assert!(
+            clear_before.ends_with("\r\x1b[2K"),
+            "ok should auto-clear status line, got:\n{out}"
+        );
+    }
+
+    // --- StatusLineProcessor ---
+
+    #[test]
+    fn status_line_processor_splits_on_newline() {
+        let mut p = StatusLineProcessor::new();
+        let lines: Vec<_> = p.feed(b"hello\nworld\n").collect();
+        assert_eq!(lines, vec!["hello", "world"]);
+    }
+
+    #[test]
+    fn status_line_processor_splits_on_cr() {
+        let mut p = StatusLineProcessor::new();
+        let lines: Vec<_> = p.feed(b"evaluating...\rdownloading...\n").collect();
+        assert_eq!(lines, vec!["evaluating...", "downloading..."]);
+    }
+
+    #[test]
+    fn status_line_processor_filters_ansi_only() {
+        let mut p = StatusLineProcessor::new();
+        let lines: Vec<_> = p.feed(b"\x1b[0m\x1b[K\nreal content\n").collect();
+        assert_eq!(lines, vec!["real content"]);
+    }
+
+    #[test]
+    fn status_line_processor_filters_empty() {
+        let mut p = StatusLineProcessor::new();
+        let lines: Vec<_> = p.feed(b"\n\n\nhello\n").collect();
+        assert_eq!(lines, vec!["hello"]);
+    }
+
+    #[test]
+    fn status_line_processor_buffers_partial() {
+        let mut p = StatusLineProcessor::new();
+        let lines1: Vec<_> = p.feed(b"partial").collect();
+        assert!(lines1.is_empty());
+        let lines2: Vec<_> = p.feed(b" line\n").collect();
+        assert_eq!(lines2, vec!["partial line"]);
+    }
+
+    #[test]
+    fn status_line_processor_trims_whitespace() {
+        let mut p = StatusLineProcessor::new();
+        let lines: Vec<_> = p.feed(b"  spaced  \n").collect();
+        assert_eq!(lines, vec!["spaced"]);
+    }
+
+    #[test]
+    fn status_line_processor_handles_crlf() {
+        let mut p = StatusLineProcessor::new();
+        let lines: Vec<_> = p.feed(b"line one\r\nline two\r\n").collect();
+        assert_eq!(lines, vec!["line one", "line two"]);
+    }
+
+    // --- feed_status_bytes ---
+
+    #[test]
+    fn feed_status_bytes_updates_status_line() {
+        let mut buf = Vec::new();
+        let mut tw = CrapWriterBuilder::new(&mut buf)
+            .status_line(true)
+            .build()
+            .unwrap();
+        tw.feed_status_bytes(b"building...\nlinking...\n").unwrap();
+        let out = String::from_utf8(buf).unwrap();
+        assert!(out.contains("# building..."), "got:\n{out}");
+        assert!(out.contains("# linking..."), "got:\n{out}");
     }
 
     #[test]

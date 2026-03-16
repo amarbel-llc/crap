@@ -28,6 +28,12 @@
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.nixpkgs-master.follows = "nixpkgs-master";
     };
+    bob = {
+      url = "github:amarbel-llc/bob";
+      inputs.nixpkgs.follows = "nixpkgs";
+      inputs.nixpkgs-master.follows = "nixpkgs-master";
+      inputs.utils.follows = "utils";
+    };
   };
 
   outputs =
@@ -40,6 +46,7 @@
       rust,
       shell,
       just-us,
+      bob,
     }:
     utils.lib.eachDefaultSystem (
       system:
@@ -91,7 +98,10 @@
             shell.devShells.${system}.default
           ];
 
-          packages = [ just-us.packages.${system}.default ];
+          packages = [
+            just-us.packages.${system}.default
+            bob.packages.${system}.batman
+          ];
         };
       }
     );

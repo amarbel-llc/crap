@@ -64,8 +64,28 @@
           src = ./go-crap;
           vendorHash = "sha256-5Pb0w+3v+R9ciPQ4H0HyFZlIJPOGjFFURDwLl2JvLjs=";
 
+          nativeCheckInputs = [ pkgs.git ];
+
           meta = {
             description = "CRAP-2 validator and writer toolkit";
+            homepage = "https://github.com/amarbel-llc/crap";
+            license = pkgs.lib.licenses.mit;
+          };
+        };
+
+        crap-git = pkgs.buildGoModule {
+          pname = "crap-git";
+          version = "0.1.0";
+          src = ./go-crap;
+          subPackages = [ "cmd/crap-git" ];
+          vendorHash = "sha256-5Pb0w+3v+R9ciPQ4H0HyFZlIJPOGjFFURDwLl2JvLjs=";
+
+          postInstall = ''
+            mv $out/bin/crap-git "$out/bin/::git"
+          '';
+
+          meta = {
+            description = "Git wrapper that emits CRAP-2 output";
             homepage = "https://github.com/amarbel-llc/crap";
             license = pkgs.lib.licenses.mit;
           };
@@ -88,7 +108,7 @@
       {
         packages = {
           default = large-colon;
-          inherit large-colon rust-crap;
+          inherit large-colon crap-git rust-crap;
         };
 
         devShells.default = pkgs.mkShell {

@@ -32,6 +32,28 @@ tap-dancer's `tty_build_last_line` builder method maps to rust-crap's
 `status_line` method. The emitted pragma changes from
 `pragma +tty-build-last-line` to `pragma +status-line`.
 
+### YAML single-line values use quoted scalars
+
+tap-dancer used block scalar (`|`) for all output values. rust-crap uses quoted
+scalars (`"value"`) for single-line values and block scalar for multi-line. This
+also interacts with blank-line filtering: if a value like `"hello\n"` has its
+trailing newline stripped, it becomes single-line and gets quoted. Tests
+asserting exact YAML format will need updating.
+
+```yaml
+# tap-dancer (always block scalar)
+  output: |
+    hello
+
+# rust-crap (single-line → quoted scalar)
+  output: "hello"
+
+# rust-crap (multi-line → block scalar, same as before)
+  output: |
+    line one
+    line two
+```
+
 ## Step-by-step migration
 
 ### 1. Update Cargo.toml
@@ -102,11 +124,53 @@ fn has_visible_content(s: &str) -> bool {
 use rust_crap::has_visible_content;
 ```
 
+#### Single-writer lifecycle (recommended)
+
+The intended usage pattern is **one CrapWriter for the entire output lifecycle**.
+The same writer that emits the version/plan also handles status line updates and
+test point emission. This enables auto-clear: the writer tracks whether a status
+line is active and automatically clears it before emitting test points.
+
+If your code creates separate writers for plan emission and test point emission,
+refactor to use a single writer. Wrap it in a `Mutex` if needed for concurrent
+access:
+
+```rust
+// Before (split writers — auto-clear DOES NOT work)
+{
+    let mut writer = CrapWriterBuilder::new(&mut stdout).build()?;
+    writer.plan_ahead(count)?;
+} // writer dropped
+
+// ... recipes run, status lines written directly to stdout ...
+
+{
+    // Fresh writer has no status line state — auto-clear cannot fire
+    let mut writer = CrapWriterBuilder::new(&mut stdout)
+        .build_without_printing()?;
+    writer.test_point(&result)?;
+}
+
+// After (single writer — auto-clear works)
+let writer = Mutex::new(
+    CrapWriterBuilder::new(&mut stdout)
+        .color(color)
+        .status_line(streaming)
+        .build()?
+);
+writer.lock().unwrap().plan_ahead(count)?;
+
+// In streaming callback:
+writer.lock().unwrap().feed_status_bytes(chunk)?;
+
+// After recipe completes:
+writer.lock().unwrap().test_point(&result)?;
+// ^ auto-clears any active status line before emitting
+```
+
 #### PTY line splitting + DECAWM + visible content filtering
 
-This is the most significant simplification. If your code manually splits PTY
-output on `\r`/`\n`, trims lines, checks visible content, and emits DECAWM-
-wrapped status lines, replace the entire block with `feed_status_bytes()`:
+With a single writer, replace inline PTY streaming with `feed_status_bytes()`:
 
 ```rust
 // Before (inline PTY streaming)
@@ -131,9 +195,9 @@ stream_command_output(cmd, &|chunk| {
     Ok(())
 })
 
-// After (using CrapWriter)
+// After (single writer)
 stream_command_output(cmd, &|chunk| {
-    writer.feed_status_bytes(chunk)
+    writer.lock().unwrap().feed_status_bytes(chunk)
 })
 ```
 
@@ -144,11 +208,13 @@ stream_command_output(cmd, &|chunk| {
 - Filtering ANSI-only/blank lines via `has_visible_content`
 - DECAWM wrapping when color is enabled
 - Writing the `# <text>` status line format
+- Tracking `status_line_active` for auto-clear
 
 #### Standalone StatusLineProcessor
 
-If you need the line-splitting without a CrapWriter (e.g., you're writing to a
-different output), use `StatusLineProcessor` directly:
+If you cannot use a single writer (e.g., the writer is not available during
+streaming), use `StatusLineProcessor` directly. You retain manual control over
+output and must handle status line clearing yourself:
 
 ```rust
 use rust_crap::StatusLineProcessor;
@@ -157,28 +223,27 @@ let mut proc = StatusLineProcessor::new();
 // In your streaming callback:
 for line in proc.feed(chunk) {
     // `line` is trimmed, visible-content-only
-    // Do whatever you want with it
+    // You must write the status line and handle clearing manually
 }
 ```
 
 #### Auto-clear before test points
 
-rust-crap's `CrapWriter` automatically clears any active status line before
-emitting test points (`ok`, `not ok`, `skip`, `todo`, `bail_out`). If your code
-manually writes `\r\x1b[2K` before test points to clear status lines, you can
-remove that — the writer handles it.
+When using a single CrapWriter for both streaming and test point emission,
+auto-clear works automatically. The writer clears any active status line before
+`ok`, `not ok`, `skip`, `todo`, `bail_out`, and `test_point` calls.
+
+**Important:** Auto-clear only works when the same CrapWriter instance is used
+for both `feed_status_bytes`/`update_last_line` and test point emission. If you
+use `build_without_printing()` to create a fresh writer per test point, it has no
+knowledge of active status lines and auto-clear will not fire. In that case,
+you must clear manually:
 
 ```rust
-// Before
-if output_format == OutputFormat::TapStreamedOutput {
-    write!(stdout, "\r\x1b[2K")?;
-    stdout.flush()?;
-}
+// Manual clear (only needed with split writers)
+write!(stdout, "\r\x1b[2K")?;
+stdout.flush()?;
 writer.test_point(&test_result)?;
-
-// After
-writer.test_point(&test_result)?;
-// Auto-clear happens inside test_point when a status line is active
 ```
 
 ### 5. Update test assertions
@@ -207,13 +272,17 @@ now redundant (but harmless to leave).
 ### Builder
 
 ```rust
+// Recommended: single writer for entire lifecycle
 let mut writer = CrapWriterBuilder::new(&mut stdout)
     .color(true)              // Enable ANSI colors
     .default_locale()         // Use system locale for number formatting
     .status_line(true)        // Enable status line pragma
     .build()?;                // Emits version + pragmas
 
-// Or for test points only (no version/pragma emission):
+// build_without_printing: skips version/pragma emission.
+// Use only when you need a writer mid-stream (e.g., subtests).
+// NOTE: a writer created this way has no status line state —
+// auto-clear before test points will not fire.
 let mut writer = CrapWriterBuilder::new(&mut stdout)
     .color(true)
     .build_without_printing()?;

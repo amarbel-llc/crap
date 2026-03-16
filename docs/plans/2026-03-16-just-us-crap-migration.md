@@ -2,15 +2,15 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development to implement this plan task-by-task.
 
-**Goal:** Replace tap-dancer dependency with rust-crap in just-us, removing inline TTY helpers that are now provided by rust-crap.
+**Goal:** Replace tap-dancer dependency with rust-crap in just-us, removing inline TTY helpers and adopting a single-writer lifecycle where one CrapWriter handles version/plan, status line streaming, and test point emission.
 
-**Architecture:** Mechanical dependency swap + deletion of ~40 lines of inline TTY helpers replaced by `feed_status_bytes()`. The rust-crap API mirrors tap-dancer's with renames (`Tap*` → `Crap*`, `tty_build_last_line` → `status_line`).
+**Architecture:** Single `Mutex<CrapWriter>` created in `run_tap()`, threaded through recipe execution. Replaces the current split-writer pattern (one writer for plan, fresh writer per test point) and ~40 lines of inline TTY helpers in `recipe.rs`. Also replaces `TapTally` — `CrapWriter` already tracks counter and failure state.
 
 **Tech Stack:** Rust, rust-crap (git dep from github.com/amarbel-llc/crap)
 
 **Rollback:** Revert the Cargo.toml change + `git checkout src/justfile.rs src/recipe.rs`
 
-**Reference:** See `docs/migration-from-tap-dancer.md` in the crap repo for the full API mapping.
+**Reference:** See `docs/migration-from-tap-dancer.md` for the full API mapping, YAML format differences, and single-writer pattern.
 
 ---
 
@@ -28,11 +28,6 @@ tap-dancer = { git = "https://github.com/amarbel-llc/bob" }
 
 Replace with:
 ```toml
-rust-crap = { git = "https://github.com/amarbel-llc/crap", rev = "579d90e" }
-```
-
-Note: Use the `rev` pin to the current HEAD of the `fair-cypress` branch. The package is in `rust-crap/` subdirectory of the repo, so you may need to verify the path resolves. If cargo can't find the crate, try:
-```toml
 rust-crap = { git = "https://github.com/amarbel-llc/crap" }
 ```
 
@@ -49,49 +44,140 @@ feat: replace tap-dancer dependency with rust-crap
 
 ---
 
-### Task 2: Rename all tap-dancer references in justfile.rs
+### Task 2: Refactor justfile.rs to single-writer lifecycle
 
 **Files:**
 - Modify: `src/justfile.rs`
 
-**Step 1: Find all tap_dancer references**
+This is the key architectural change. Currently `run_tap()` creates a writer at the top for version/plan, drops it, then creates a fresh `build_without_printing()` writer per test point. We refactor to one `Mutex<CrapWriter>` for the entire lifecycle.
 
-Search `src/justfile.rs` for `tap_dancer`. There should be ~8 occurrences.
+**Step 1: Understand the current flow**
 
-**Step 2: Apply renames**
+Read `src/justfile.rs` and find `run_tap()`. The current pattern:
 
-| Before | After |
-|---|---|
-| `tap_dancer::TapWriterBuilder` | `rust_crap::CrapWriterBuilder` |
-| `tap_dancer::TestResult` | `rust_crap::TestResult` |
-| `.tty_build_last_line(...)` | `.status_line(...)` |
+1. Lines ~293-304: Create writer #1, emit version+plan, drop it
+2. Lines ~306-322: Run recipes via `run_recipe()`, passing `tap_tally: Mutex<TapTally>`
+3. Lines ~510-522: Per recipe, create writer #2 via `build_without_printing()`, emit test point
 
-Do NOT change:
-- `TestResult` field names (they're identical)
-- `.build()`, `.build_without_printing()`, `.plan_ahead()`, `.test_point()` (same names)
-- `.color()`, `.default_locale()` (same names)
+`TapTally` (search for its definition) tracks `counter: usize`, `failures: usize`, and `color: bool`. `CrapWriter` already has `has_failures()` and an internal counter, so `TapTally` can be eliminated.
 
-**Step 3: Remove manual status line clear before test_point**
+**Step 2: Replace the plan-emission block**
 
-In `justfile.rs`, find the block that looks like:
+Replace the scoped block at lines ~293-304:
+
 ```rust
+// Before
+{
+    let mut stdout = io::stdout().lock();
+    let mut writer = tap_dancer::TapWriterBuilder::new(&mut stdout)
+        .color(color)
+        .default_locale()
+        .tty_build_last_line(output_format == OutputFormat::TapStreamedOutput)
+        .build()
+        .map_err(|io_error| Error::StdoutIo { io_error })?;
+    writer
+        .plan_ahead(plan_count)
+        .map_err(|io_error| Error::StdoutIo { io_error })?;
+}
+
+// After
+let stdout = io::stdout();
+let mut stdout_lock = stdout.lock();
+let writer = rust_crap::CrapWriterBuilder::new(&mut stdout_lock)
+    .color(color)
+    .default_locale()
+    .status_line(output_format == OutputFormat::TapStreamedOutput)
+    .build()
+    .map_err(|io_error| Error::StdoutIo { io_error })?;
+writer
+    .plan_ahead(plan_count)
+    .map_err(|io_error| Error::StdoutIo { io_error })?;
+let writer = Mutex::new(writer);
+```
+
+**Important lifetime note:** The `CrapWriter` borrows `stdout_lock`, so `stdout` and `stdout_lock` must live as long as the writer. Declare them before the writer and don't drop them. If lifetime issues arise, consider using `Box<dyn Write>` or collecting to a `Vec<u8>` buffer. Another option: since `CrapWriter` takes `&mut impl Write`, you may need to restructure so the lock is held for the duration of `run_tap()`. If that causes contention with recipe execution (which also writes to stdout for streamed output), you may need to use a buffer that flushes to stdout, or pass the writer's Mutex through to recipes.
+
+**Step 3: Replace `TapTally` with the shared writer**
+
+Replace `let tap_tally = Mutex::new(TapTally::new(color));` with passing the writer Mutex to `run_recipe`. The writer tracks failures via `has_failures()` and the counter internally.
+
+Find where `tap_tally` is passed through `run_recipe` and trace its usage:
+- In `run_recipe`, it's passed as `tap_tally: Option<&Mutex<TapTally>>`
+- Recipes lock it to increment the counter and record failures
+- After all recipes, `tap_tally.into_inner()` checks for failures
+
+Change the parameter from `Option<&Mutex<TapTally>>` to `Option<&Mutex<rust_crap::CrapWriter>>` (or a type alias). Update all call sites.
+
+**Step 4: Replace per-test-point writer creation**
+
+Find the block around lines ~510-522 where `build_without_printing()` creates a fresh writer per test point. Replace with locking the shared writer:
+
+```rust
+// Before
+let mut stdout = io::stdout().lock();
 if output_format == OutputFormat::TapStreamedOutput {
     write!(stdout, "\r\x1b[2K").map_err(|io_error| Error::StdoutIo { io_error })?;
     stdout.flush().map_err(|io_error| Error::StdoutIo { io_error })?;
 }
+let mut writer = tap_dancer::TapWriterBuilder::new(&mut stdout)
+    .color(tap.color)
+    .default_locale()
+    .build_without_printing()
+    .map_err(|io_error| Error::StdoutIo { io_error })?;
+writer
+    .test_point(&test_result)
+    .map_err(|io_error| Error::StdoutIo { io_error })?;
+
+// After
+let mut writer = writer_mutex.lock().unwrap();
+writer
+    .test_point(&test_result)
+    .map_err(|io_error| Error::StdoutIo { io_error })?;
 ```
 
-This appears just before `writer.test_point(&test_result)`. Delete it — rust-crap auto-clears status lines before test points.
+Note: The manual `\r\x1b[2K` clear is gone — `test_point` auto-clears because the same writer tracked the status line state from `feed_status_bytes`.
 
-**Step 4: Verify it compiles**
+**Step 5: Replace the failure check**
+
+```rust
+// Before
+let tap = tap_tally.into_inner().unwrap();
+if tap.failures > 0 {
+    Err(Error::TapFailure { count: tap.counter, failures: tap.failures })
+}
+
+// After
+let writer = writer.into_inner().unwrap();
+if writer.has_failures() {
+    // You'll need to track the failure count separately, or add a method.
+    // For now, if CrapWriter doesn't expose failure count, keep a simple
+    // AtomicUsize counter alongside the writer mutex.
+}
+```
+
+Check whether `CrapWriter` exposes enough state to replace `TapTally` entirely. If it doesn't expose a failure count (only `has_failures() -> bool`), either:
+- Keep a separate `AtomicUsize` for the failure count
+- Add a `failure_count()` method to CrapWriter (preferred — note this as upstream feedback)
+
+**Step 6: Rename TestResult references**
+
+Apply the mechanical renames:
+
+| Before | After |
+|---|---|
+| `tap_dancer::TestResult` | `rust_crap::TestResult` |
+
+`TestResult` field names are identical between tap-dancer and rust-crap.
+
+**Step 7: Verify it compiles**
 
 Run: `cargo check`
-Expected: May still have errors in `recipe.rs` if it references `tap_dancer` — that's Task 3.
+Expected: Errors in `recipe.rs` (Task 3) but `justfile.rs` should be clean.
 
-**Step 5: Commit**
+**Step 8: Commit**
 
 ```
-refactor: rename tap-dancer types to rust-crap in justfile.rs
+refactor: single CrapWriter lifecycle in run_tap, remove TapTally
 ```
 
 ---
@@ -101,17 +187,22 @@ refactor: rename tap-dancer types to rust-crap in justfile.rs
 **Files:**
 - Modify: `src/recipe.rs`
 
-This is the most impactful change. `recipe.rs` has two nearly-identical blocks of inline PTY streaming code (one in `run_linewise` ~line 519-545, one in `run_script` ~line 760-785). Both will be replaced with `feed_status_bytes`.
-
 **Step 1: Delete `has_visible_content` function**
 
-Remove the `has_visible_content` function at the top of `recipe.rs` (approximately lines 3-23). This function is now provided by `rust_crap::has_visible_content` (though we won't need to import it — `feed_status_bytes` uses it internally).
+Remove the `has_visible_content` function at the top of `recipe.rs` (approximately lines 3-23). This is now provided by `rust_crap::has_visible_content`, though we won't need to import it — `feed_status_bytes` uses it internally.
 
-**Step 2: Replace the streaming callback in run_linewise**
+**Step 2: Thread the writer Mutex into recipe execution**
 
-Find the `OutputFormat::TapStreamedOutput` match arm in `run_linewise` (around line 522). It currently looks like:
+Find where `run_linewise` and `run_script` are called. They need access to the shared `Mutex<CrapWriter>`. Add a parameter — trace the call chain from `run_recipe` to find the right signature.
+
+The writer Mutex should be passed as an `Option` (since non-TAP output formats don't use it), matching the existing `tap_output: Option<&Mutex<Vec<u8>>>` pattern.
+
+**Step 3: Replace the streaming callback in run_linewise**
+
+Find the `OutputFormat::TapStreamedOutput` match arm in `run_linewise` (around line 522). Replace the entire inline PTY streaming block:
 
 ```rust
+// Before
 OutputFormat::TapStreamedOutput => {
     use std::io::IsTerminal;
     let stdout_lock = io::stdout();
@@ -137,64 +228,36 @@ OutputFormat::TapStreamedOutput => {
         Ok(())
     })
 }
-```
 
-**Important design consideration:** `feed_status_bytes` requires a `&mut CrapWriter`, but the streaming callback is a closure that runs during command execution — before the test result is known. The current architecture creates a CrapWriter at two points:
-
-1. In `justfile.rs` at the start of `run_tap()` for version/plan emission
-2. In `justfile.rs` after each recipe completes for test point emission
-
-Neither writer is available inside `recipe.rs`'s streaming callback. There are two approaches:
-
-**Approach A (recommended): Pass a CrapWriter into the recipe execution**
-
-This requires threading a `&mut CrapWriter` (or a shared reference) through `run_recipe` → `run_linewise`/`run_script`. This is a larger refactor but produces the cleanest result.
-
-**Approach B (minimal): Use StatusLineProcessor directly**
-
-Replace the inline logic with `StatusLineProcessor` but keep the manual `write!` calls. This is a smaller change:
-
-```rust
+// After
 OutputFormat::TapStreamedOutput => {
-    use std::io::IsTerminal;
-    let stdout_lock = io::stdout();
-    let is_tty = stdout_lock.is_terminal();
-    let proc = Mutex::new(rust_crap::StatusLineProcessor::new());
     stream_command_output(cmd, &|chunk| {
-        let mut proc = proc.lock().unwrap();
-        let mut stdout = stdout_lock.lock();
-        for line in proc.feed(chunk) {
-            if is_tty {
-                write!(stdout, "\r\x1b[2K\x1b[?7l# {line}\x1b[?7h")?;
-            } else {
-                write!(stdout, "\r\x1b[2K# {line}")?;
-            }
-            stdout.flush()?;
-        }
-        Ok(())
+        let mut writer = writer_mutex.lock().unwrap();
+        writer.feed_status_bytes(chunk)
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
     })
 }
 ```
 
-**Use Approach B for now.** It validates the `StatusLineProcessor` API without requiring architectural changes to how CrapWriter flows through just-us. A follow-up can thread CrapWriter through for `feed_status_bytes`.
+Note: Check the error type — `feed_status_bytes` returns `io::Result<()>` which should be compatible with `stream_command_output`'s callback signature. If not, map the error.
 
-**Step 3: Apply the same replacement in run_script**
+**Step 4: Apply the same replacement in run_script**
 
-Find the second identical streaming block in `run_script` (around line 763-785) and apply the same Approach B replacement.
+Find the second identical streaming block in `run_script` (around line 763-785) and apply the same replacement.
 
-**Step 4: Clean up unused imports**
+**Step 5: Clean up unused imports**
 
-After removing `has_visible_content`, check if any imports are now unused (the function may have been the only consumer of certain `use` items).
+After removing `has_visible_content`, check if any imports are now unused.
 
-**Step 5: Verify it compiles**
+**Step 6: Verify it compiles**
 
 Run: `cargo check`
 Expected: Clean compilation.
 
-**Step 6: Commit**
+**Step 7: Commit**
 
 ```
-refactor: replace inline TTY helpers with rust-crap StatusLineProcessor
+refactor: replace inline TTY helpers with CrapWriter.feed_status_bytes
 ```
 
 ---
@@ -204,81 +267,87 @@ refactor: replace inline TTY helpers with rust-crap StatusLineProcessor
 **Files:**
 - Modify: `tests/tap.rs`
 
-**Step 1: Find all TAP version assertions**
+**Step 1: Find all version and pragma assertions**
 
 Search `tests/tap.rs` for:
 - `"TAP version 14"` — replace with `"CRAP version 2"`
 - `"tty-build-last-line"` — replace with `"status-line"`
 
-**Step 2: Apply replacements**
+**Step 2: Find YAML format assertions**
 
-This should be a mechanical find-and-replace. There are approximately 56 tests;
-many will contain version string assertions.
+Search for `output: |` in test assertions. rust-crap uses quoted scalars for
+single-line values:
 
-**Step 3: Run the tests**
+```rust
+// Before (tap-dancer: always block scalar)
+assert!(out.contains("  output: |\n    hello\n"));
+
+// After (rust-crap: single-line → quoted scalar)
+assert!(out.contains("  output: \"hello\"\n"));
+```
+
+Multi-line values still use block scalar (`|`). Only single-line values change.
+
+**Step 3: Apply all replacements**
+
+This is partly mechanical (version string, pragma name) and partly requires
+judgment (YAML format). Run the tests after each batch of changes to find
+remaining failures.
+
+**Step 4: Run the tests**
 
 Run: `cargo test`
-Expected: All tests pass. If any fail, investigate — the output format change
-from TAP to CRAP may surface edge cases in test assertions that check exact
-output rather than `contains()`.
+Expected: All tests pass. Iterate on any remaining failures.
 
-**Step 4: Commit**
+**Step 5: Commit**
 
 ```
-test: update assertions for CRAP version 2 output format
+test: update assertions for CRAP version 2 output and YAML format
 ```
 
 ---
 
-### Task 5: Verify run_linewise streaming with has_visible_content
+### Task 5: Verify and smoke test
 
-**Step 1: Check the second streaming block**
-
-In `run_script` (around line 775), the original code used `!line.is_empty()`
-instead of `has_visible_content(line)`. The `StatusLineProcessor` already
-filters via `has_visible_content`, so this is now handled. Verify that both
-streaming blocks use the same `StatusLineProcessor`-based approach.
-
-**Step 2: Run the full test suite**
+**Step 1: Run the full test suite**
 
 Run: `cargo test`
 Expected: All tests pass.
 
-**Step 3: Manual smoke test**
-
-Run just-us against a justfile with a recipe that produces output:
-
-```
-echo 'default:\n\techo hello' | cargo run -- --output-format tap
-```
-
-Verify output shows `CRAP version 2` header and `ok 1` result.
-
-**Step 4: Commit (if any fixes needed)**
-
-```
-fix: align both streaming paths to use StatusLineProcessor
-```
-
----
-
-### Task 6: Clean up and final verification
-
-**Step 1: Run clippy**
+**Step 2: Run clippy**
 
 Run: `cargo clippy`
 Expected: No new warnings.
 
-**Step 2: Run fmt**
+**Step 3: Run fmt**
 
 Run: `cargo fmt`
 
-**Step 3: Run full test suite one more time**
-
-Run: `cargo test`
-
-**Step 4: Final commit if needed**
+**Step 4: Commit if needed**
 
 ```
 chore: clean up after tap-dancer to rust-crap migration
+```
+
+---
+
+### Task 6: Record deviations
+
+**Files:**
+- Create: `docs/plans/2026-03-16-just-us-crap-migration-deviations.md`
+
+Record any deviations from this plan: unexpected compilation errors, API
+mismatches, test failures that required non-obvious fixes, lifetime issues with
+the shared writer, etc. This feedback improves the crap migration guide and API.
+
+Format each deviation as:
+
+```markdown
+### N. Short title
+
+**Plan (Task N Step N):** What the plan said to do.
+
+**Actual:** What actually happened.
+
+**Upstream action:** What should change in rust-crap or the migration guide.
 ```

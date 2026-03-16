@@ -12,8 +12,8 @@ import (
 func TestNewWriterEmitsVersionHeader(t *testing.T) {
 	var buf bytes.Buffer
 	NewWriter(&buf)
-	if buf.String() != "CRAP version 2\n" {
-		t.Errorf("expected CRAP version 2 header, got: %q", buf.String())
+	if buf.String() != "CRAP-2\n" {
+		t.Errorf("expected CRAP-2 header, got: %q", buf.String())
 	}
 }
 
@@ -123,12 +123,39 @@ func TestTodoEmitsDirective(t *testing.T) {
 	}
 }
 
+func TestWarnEmitsDirective(t *testing.T) {
+	var buf bytes.Buffer
+	tw := NewWriter(&buf)
+	n := tw.Warn("deprecation", "uses old API")
+	if n != 1 {
+		t.Errorf("expected test number 1, got %d", n)
+	}
+	if !strings.Contains(buf.String(), "ok 1 - deprecation # WARN uses old API\n") {
+		t.Errorf("expected warn line, got: %q", buf.String())
+	}
+}
+
+func TestWarnNotOkEmitsDirective(t *testing.T) {
+	var buf bytes.Buffer
+	tw := NewWriter(&buf)
+	n := tw.WarnNotOk("critical", "something wrong")
+	if n != 1 {
+		t.Errorf("expected test number 1, got %d", n)
+	}
+	if !strings.Contains(buf.String(), "not ok 1 - critical # WARN something wrong\n") {
+		t.Errorf("expected warn not ok line, got: %q", buf.String())
+	}
+	if !tw.HasFailures() {
+		t.Error("expected HasFailures to be true after WarnNotOk")
+	}
+}
+
 func TestPlanAhead(t *testing.T) {
 	var buf bytes.Buffer
 	tw := NewWriter(&buf)
 	tw.PlanAhead(5)
-	if !strings.Contains(buf.String(), "1..5\n") {
-		t.Errorf("expected plan line 1..5, got: %q", buf.String())
+	if !strings.Contains(buf.String(), "1::5\n") {
+		t.Errorf("expected plan line 1::5, got: %q", buf.String())
 	}
 	_ = tw
 }
@@ -139,8 +166,8 @@ func TestPlanAfterTests(t *testing.T) {
 	tw.Ok("a")
 	tw.Ok("b")
 	tw.Plan()
-	if !strings.HasSuffix(buf.String(), "1..2\n") {
-		t.Errorf("expected plan line 1..2, got: %q", buf.String())
+	if !strings.HasSuffix(buf.String(), "1::2\n") {
+		t.Errorf("expected plan line 1::2, got: %q", buf.String())
 	}
 }
 
@@ -148,8 +175,8 @@ func TestPlanWithZeroTests(t *testing.T) {
 	var buf bytes.Buffer
 	tw := NewWriter(&buf)
 	tw.Plan()
-	if !strings.HasSuffix(buf.String(), "1..0\n") {
-		t.Errorf("expected plan line 1..0, got: %q", buf.String())
+	if !strings.HasSuffix(buf.String(), "1::0\n") {
+		t.Errorf("expected plan line 1::0, got: %q", buf.String())
 	}
 }
 
@@ -179,10 +206,10 @@ func TestSubtestEmitsIndentedBlock(t *testing.T) {
 	sub.Plan()
 	tw.Ok("nested")
 
-	expected := "CRAP version 2\n" +
+	expected := "CRAP-2\n" +
 		"    # Subtest: nested\n" +
 		"    ok 1 - inner pass\n" +
-		"    1..1\n" +
+		"    1::1\n" +
 		"ok 1 - nested\n"
 
 	if buf.String() != expected {
@@ -216,7 +243,7 @@ func TestSequentialNumbering(t *testing.T) {
 	if lines[4] != "not ok 4 - todo # TODO later" {
 		t.Errorf("line 4: %q", lines[4])
 	}
-	if lines[5] != "1..4" {
+	if lines[5] != "1::4" {
 		t.Errorf("plan line: %q", lines[5])
 	}
 }
@@ -232,13 +259,13 @@ func TestNestedSubtestTwoLevelsDeep(t *testing.T) {
 	outer.Plan()
 	tw.Ok("outer")
 
-	expected := "CRAP version 2\n" +
+	expected := "CRAP-2\n" +
 		"    # Subtest: outer\n" +
 		"        # Subtest: inner\n" +
 		"        ok 1 - deep test\n" +
-		"        1..1\n" +
+		"        1::1\n" +
 		"    ok 1 - inner\n" +
-		"    1..1\n" +
+		"    1::1\n" +
 		"ok 1 - outer\n"
 
 	if buf.String() != expected {
@@ -311,7 +338,7 @@ func TestPlanAheadPreventsDoublePlan(t *testing.T) {
 	tw.Ok("b")
 	tw.Plan()
 	out := buf.String()
-	count := strings.Count(out, "1..")
+	count := strings.Count(out, "1::")
 	if count != 1 {
 		t.Errorf("expected exactly one plan line, got %d in:\n%s", count, out)
 	}
@@ -392,10 +419,10 @@ func TestWriteAllBasicOk(t *testing.T) {
 		{Description: "first", Ok: true},
 		{Description: "second", Ok: true},
 	}))
-	expected := "CRAP version 2\n" +
+	expected := "CRAP-2\n" +
 		"ok 1 - first\n" +
 		"ok 2 - second\n" +
-		"1..2\n"
+		"1::2\n"
 	if buf.String() != expected {
 		t.Errorf("expected:\n%s\ngot:\n%s", expected, buf.String())
 	}
@@ -417,7 +444,7 @@ func TestWriteAllNotOkWithDiagnostics(t *testing.T) {
 	if !strings.Contains(out, "  message: broke\n") {
 		t.Errorf("expected message diagnostic, got:\n%s", out)
 	}
-	if !strings.HasSuffix(out, "1..1\n") {
+	if !strings.HasSuffix(out, "1::1\n") {
 		t.Errorf("expected trailing plan, got:\n%s", out)
 	}
 }
@@ -452,7 +479,7 @@ func TestWriteAllPlanAheadSkipsTrailingPlan(t *testing.T) {
 		{Description: "a", Ok: true},
 		{Description: "b", Ok: true},
 	}))
-	count := strings.Count(buf.String(), "1..")
+	count := strings.Count(buf.String(), "1::")
 	if count != 1 {
 		t.Errorf("expected exactly one plan line, got %d in:\n%s", count, buf.String())
 	}
@@ -466,12 +493,12 @@ func TestWriteAllSubtest(t *testing.T) {
 			sub.Ok("inner pass")
 		}},
 	}))
-	expected := "CRAP version 2\n" +
+	expected := "CRAP-2\n" +
 		"    # Subtest: nested\n" +
 		"    ok 1 - inner pass\n" +
-		"    1..1\n" +
+		"    1::1\n" +
 		"ok 1 - nested\n" +
-		"1..1\n"
+		"1::1\n"
 	if buf.String() != expected {
 		t.Errorf("expected:\n%s\ngot:\n%s", expected, buf.String())
 	}
@@ -497,7 +524,7 @@ func TestWriteAllNestedWriteAll(t *testing.T) {
 	if !strings.Contains(out, "    not ok 2 - inner-b\n") {
 		t.Errorf("expected inner-b, got:\n%s", out)
 	}
-	if !strings.Contains(out, "    1..2\n") {
+	if !strings.Contains(out, "    1::2\n") {
 		t.Errorf("expected subtest plan, got:\n%s", out)
 	}
 	if !strings.Contains(out, "ok 1 - outer\n") {
@@ -523,8 +550,8 @@ func TestWriteAllMixedImperativeAndIterator(t *testing.T) {
 	if !strings.Contains(out, "    ok 2 - from-iter\n") {
 		t.Errorf("expected iterator test, got:\n%s", out)
 	}
-	if !strings.Contains(out, "    1..2\n") {
-		t.Errorf("expected combined plan 1..2, got:\n%s", out)
+	if !strings.Contains(out, "    1::2\n") {
+		t.Errorf("expected combined plan 1::2, got:\n%s", out)
 	}
 }
 
@@ -556,7 +583,7 @@ func TestStreamedOutput(t *testing.T) {
 	}
 }
 
-func TestStreamedOutputPropagatedToSubtest(t *testing.T) {
+func TestStreamedOutputPropagatedToSubtestWithoutPragma(t *testing.T) {
 	var buf bytes.Buffer
 	tw := NewWriter(&buf)
 	tw.Pragma("streamed-output", true)
@@ -570,8 +597,8 @@ func TestStreamedOutputPropagatedToSubtest(t *testing.T) {
 	tw.Plan()
 
 	out := buf.String()
-	if !strings.Contains(out, "    pragma +streamed-output\n") {
-		t.Errorf("expected subtest to contain pragma +streamed-output, got:\n%s", out)
+	if strings.Contains(out, "    pragma +streamed-output\n") {
+		t.Errorf("streamed-output is enabled by default, subtest should NOT emit pragma, got:\n%s", out)
 	}
 }
 
@@ -720,8 +747,8 @@ func TestLocaleWriterFormatsPlanCount(t *testing.T) {
 	tw := NewLocaleWriter(&buf, language.MustParse("en-US"))
 	tw.PlanAhead(10000)
 	out := buf.String()
-	if !strings.Contains(out, "1..10,000\n") {
-		t.Errorf("expected locale-formatted plan 1..10,000, got:\n%s", out)
+	if !strings.Contains(out, "1::10,000\n") {
+		t.Errorf("expected locale-formatted plan 1::10,000, got:\n%s", out)
 	}
 }
 
@@ -730,8 +757,8 @@ func TestLocaleWriterGermanSeparator(t *testing.T) {
 	tw := NewLocaleWriter(&buf, language.MustParse("de-DE"))
 	tw.PlanAhead(10000)
 	out := buf.String()
-	if !strings.Contains(out, "1..10.000\n") {
-		t.Errorf("expected German-formatted plan 1..10.000, got:\n%s", out)
+	if !strings.Contains(out, "1::10.000\n") {
+		t.Errorf("expected German-formatted plan 1::10.000, got:\n%s", out)
 	}
 }
 
@@ -838,19 +865,20 @@ func TestLocaleWriterSubtestInheritsLocale(t *testing.T) {
 	if !strings.Contains(out, "    pragma +locale-formatting:en-US\n") {
 		t.Errorf("expected subtest to inherit and emit locale pragma, got:\n%s", out)
 	}
-	if !strings.Contains(out, "    1..10,000\n") {
+	if !strings.Contains(out, "    1::10,000\n") {
 		t.Errorf("expected subtest to use locale formatting, got:\n%s", out)
 	}
 }
 
-func TestEnableTTYBuildLastLineEmitsPragma(t *testing.T) {
+func TestEnableTTYBuildLastLineDoesNotEmitPragma(t *testing.T) {
 	var buf bytes.Buffer
 	tw := NewWriter(&buf)
 	tw.EnableTTYBuildLastLine()
 	out := buf.String()
-	if !strings.Contains(out, "pragma +status-line\n") {
-		t.Errorf("expected status-line pragma, got:\n%s", out)
+	if strings.Contains(out, "pragma +status-line") {
+		t.Errorf("status-line is enabled by default, should not emit pragma, got:\n%s", out)
 	}
+	_ = tw
 }
 
 func TestTTYBuildLastLineNotEmittedByDefault(t *testing.T) {
@@ -966,7 +994,7 @@ func TestTestPointNoClearWithoutActiveStatus(t *testing.T) {
 	tw.Ok("test")
 	out := buf.String()
 	// Only the version header + ok line, no clear sequence
-	expected := "CRAP version 2\nok 1 - test\n"
+	expected := "CRAP-2\nok 1 - test\n"
 	if out != expected {
 		t.Errorf("expected:\n%q\ngot:\n%q", expected, out)
 	}

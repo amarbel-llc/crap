@@ -139,9 +139,9 @@ func TestConvertSubtests(t *testing.T) {
 		t.Errorf("expected child_a in output:\n%s", out)
 	}
 
-	// streamed-output pragma should be propagated into package subtest
-	if !strings.Contains(out, "    pragma +streamed-output\n") {
-		t.Errorf("expected subtest to contain pragma +streamed-output, got:\n%s", out)
+	// streamed-output is enabled by default, subtest should NOT emit pragma
+	if strings.Contains(out, "    pragma +streamed-output\n") {
+		t.Errorf("streamed-output is default, subtest should NOT emit pragma, got:\n%s", out)
 	}
 
 	reader := NewReader(strings.NewReader(out))
@@ -181,8 +181,8 @@ func TestConvertMultiplePackages(t *testing.T) {
 	if !strings.Contains(out, "# Subtest: example.com/bar") {
 		t.Errorf("expected bar package subtest:\n%s", out)
 	}
-	if !strings.Contains(out, "1..2") {
-		t.Errorf("expected plan 1..2:\n%s", out)
+	if !strings.Contains(out, "1::2") {
+		t.Errorf("expected plan 1::2:\n%s", out)
 	}
 
 	reader := NewReader(strings.NewReader(out))
@@ -327,19 +327,16 @@ func TestConvertEmitsPragmaAndStreamedOutput(t *testing.T) {
 	ConvertGoTest(strings.NewReader(jsonEvents), &buf, false, false, false)
 	out := buf.String()
 
-	if !strings.Contains(out, "pragma +streamed-output") {
-		t.Errorf("expected pragma +streamed-output in output:\n%s", out)
+	// streamed-output is enabled by default, should NOT be explicitly emitted
+	if strings.Contains(out, "pragma +streamed-output") {
+		t.Errorf("streamed-output is default, should NOT emit pragma, got:\n%s", out)
 	}
 
 	// Streamed output comments should appear before the not ok line
-	pragmaIdx := strings.Index(out, "pragma +streamed-output")
 	commentIdx := strings.Index(out, "# foo_test.go:10: expected 1, got 2")
 	notOkIdx := strings.Index(out, "not ok")
 	if commentIdx < 0 {
 		t.Fatalf("expected streamed output comment in output:\n%s", out)
-	}
-	if commentIdx < pragmaIdx {
-		t.Error("streamed output comment should appear after pragma")
 	}
 	if commentIdx > notOkIdx {
 		t.Error("streamed output comment should appear before not ok")
@@ -446,8 +443,8 @@ func TestConvertMixedEmptyAndRealPackages(t *testing.T) {
 	if !strings.Contains(out, "# SKIP") {
 		t.Errorf("expected SKIP for empty package:\n%s", out)
 	}
-	if !strings.Contains(out, "1..2") {
-		t.Errorf("expected plan 1..2:\n%s", out)
+	if !strings.Contains(out, "1::2") {
+		t.Errorf("expected plan 1::2:\n%s", out)
 	}
 
 	reader := NewReader(strings.NewReader(out))

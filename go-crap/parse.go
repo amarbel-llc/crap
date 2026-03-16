@@ -99,7 +99,7 @@ func splitDirective(s string) (desc string, directive Directive, reason string) 
 			continue
 		}
 		if s[i] == '#' {
-			// Check for directive pattern: " # TODO" or " # SKIP"
+			// Check for directive pattern: " # TODO", " # SKIP", or " # WARN"
 			if i > 0 && s[i-1] == ' ' {
 				after := strings.TrimSpace(s[i+1:])
 				upper := strings.ToUpper(after)
@@ -110,6 +110,10 @@ func splitDirective(s string) (desc string, directive Directive, reason string) 
 				if strings.HasPrefix(upper, "SKIP") {
 					reason := strings.TrimSpace(after[4:])
 					return s[:i-1], DirectiveSkip, reason
+				}
+				if strings.HasPrefix(upper, "WARN") {
+					reason := strings.TrimSpace(after[4:])
+					return s[:i-1], DirectiveWarn, reason
 				}
 			}
 		}

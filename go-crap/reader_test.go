@@ -27,7 +27,7 @@ func collectEvents(input string) ([]Event, []Diagnostic, Summary) {
 }
 
 func TestReaderValidMinimal(t *testing.T) {
-	input := "CRAP version 2\n1..2\nok 1 - first\nok 2 - second\n"
+	input := "CRAP-2\n1::2\nok 1 - first\nok 2 - second\n"
 	events, diags, summary := collectEvents(input)
 
 	if len(events) != 4 {
@@ -61,7 +61,7 @@ func TestReaderValidMinimal(t *testing.T) {
 }
 
 func TestReaderTrailingPlan(t *testing.T) {
-	input := "CRAP version 2\nok 1 - a\nok 2 - b\n1..2\n"
+	input := "CRAP-2\nok 1 - a\nok 2 - b\n1::2\n"
 	_, diags, summary := collectEvents(input)
 
 	for _, d := range diags {
@@ -75,7 +75,7 @@ func TestReaderTrailingPlan(t *testing.T) {
 }
 
 func TestReaderMissingVersion(t *testing.T) {
-	input := "1..1\nok 1 - test\n"
+	input := "1::1\nok 1 - test\n"
 	_, diags, summary := collectEvents(input)
 
 	if summary.Valid {
@@ -93,7 +93,7 @@ func TestReaderMissingVersion(t *testing.T) {
 }
 
 func TestReaderPlanCountMismatch(t *testing.T) {
-	input := "CRAP version 2\n1..3\nok 1 - a\nok 2 - b\n"
+	input := "CRAP-2\n1::3\nok 1 - a\nok 2 - b\n"
 	_, diags, summary := collectEvents(input)
 
 	if summary.Valid {
@@ -111,7 +111,7 @@ func TestReaderPlanCountMismatch(t *testing.T) {
 }
 
 func TestReaderDuplicatePlan(t *testing.T) {
-	input := "CRAP version 2\n1..1\nok 1 - a\n1..1\n"
+	input := "CRAP-2\n1::1\nok 1 - a\n1::1\n"
 	_, diags, _ := collectEvents(input)
 
 	found := false
@@ -126,7 +126,7 @@ func TestReaderDuplicatePlan(t *testing.T) {
 }
 
 func TestReaderYAMLBlock(t *testing.T) {
-	input := "CRAP version 2\n1..1\nnot ok 1 - fail\n  ---\n  message: broken\n  severity: fail\n  ...\n"
+	input := "CRAP-2\n1::1\nnot ok 1 - fail\n  ---\n  message: broken\n  severity: fail\n  ...\n"
 	events, diags, _ := collectEvents(input)
 
 	for _, d := range diags {
@@ -150,7 +150,7 @@ func TestReaderYAMLBlock(t *testing.T) {
 }
 
 func TestReaderBailOut(t *testing.T) {
-	input := "CRAP version 2\n1..3\nok 1 - a\nBail out! database down\n"
+	input := "CRAP-2\n1::3\nok 1 - a\nBail out! database down\n"
 	_, _, summary := collectEvents(input)
 
 	if !summary.BailedOut {
@@ -159,7 +159,7 @@ func TestReaderBailOut(t *testing.T) {
 }
 
 func TestReaderBailOutSuppressesPlanMismatch(t *testing.T) {
-	input := "CRAP version 2\n1..3\nok 1 - a\nBail out! database down\n"
+	input := "CRAP-2\n1::3\nok 1 - a\nBail out! database down\n"
 	r := NewReader(strings.NewReader(input))
 	diags := r.Diagnostics()
 	summary := r.Summary()
@@ -178,7 +178,7 @@ func TestReaderBailOutSuppressesPlanMismatch(t *testing.T) {
 }
 
 func TestReaderSkipAndTodo(t *testing.T) {
-	input := "CRAP version 2\n1..3\nok 1 - a\nok 2 - b # SKIP lazy\nnot ok 3 - c # TODO later\n"
+	input := "CRAP-2\n1::3\nok 1 - a\nok 2 - b # SKIP lazy\nnot ok 3 - c # TODO later\n"
 	_, _, summary := collectEvents(input)
 
 	if summary.Skipped != 1 {
@@ -189,8 +189,23 @@ func TestReaderSkipAndTodo(t *testing.T) {
 	}
 }
 
+func TestReaderWarnDirectiveTracking(t *testing.T) {
+	input := "CRAP-2\n1::3\nok 1 - a\nok 2 - b # WARN uses old API\nnot ok 3 - c # WARN critical\n"
+	_, _, summary := collectEvents(input)
+
+	if summary.Warned != 2 {
+		t.Errorf("expected 2 warned, got %d", summary.Warned)
+	}
+	if summary.Passed != 2 {
+		t.Errorf("expected 2 passed (ok and ok+WARN both count as pass), got %d", summary.Passed)
+	}
+	if summary.Failed != 1 {
+		t.Errorf("expected 1 failed (not ok WARN counts as fail), got %d", summary.Failed)
+	}
+}
+
 func TestReaderNumberSequenceWarning(t *testing.T) {
-	input := "CRAP version 2\n1..2\nok 1 - a\nok 5 - b\n"
+	input := "CRAP-2\n1::2\nok 1 - a\nok 5 - b\n"
 	_, diags, _ := collectEvents(input)
 
 	found := false
@@ -205,7 +220,7 @@ func TestReaderNumberSequenceWarning(t *testing.T) {
 }
 
 func TestReaderWriteTo(t *testing.T) {
-	input := "CRAP version 2\n1..1\nok 1 - pass\n"
+	input := "CRAP-2\n1::1\nok 1 - pass\n"
 	r := NewReader(strings.NewReader(input))
 	var buf strings.Builder
 	n, err := r.WriteTo(&buf)
@@ -222,7 +237,7 @@ func TestReaderWriteTo(t *testing.T) {
 }
 
 func TestReaderWriteToWithErrors(t *testing.T) {
-	input := "1..1\nok 1 - test\n"
+	input := "1::1\nok 1 - test\n"
 	r := NewReader(strings.NewReader(input))
 	var buf strings.Builder
 	r.WriteTo(&buf)
@@ -233,7 +248,7 @@ func TestReaderWriteToWithErrors(t *testing.T) {
 }
 
 func TestReaderSubtest(t *testing.T) {
-	input := "CRAP version 2\n1..1\n    # Subtest: nested\n    ok 1 - inner pass\n    1..1\nok 1 - nested\n"
+	input := "CRAP-2\n1::1\n    # Subtest: nested\n    ok 1 - inner pass\n    1::1\nok 1 - nested\n"
 	_, diags, summary := collectEvents(input)
 
 	for _, d := range diags {
@@ -247,7 +262,7 @@ func TestReaderSubtest(t *testing.T) {
 }
 
 func TestReaderNestedSubtest(t *testing.T) {
-	input := "CRAP version 2\n1..1\n    # Subtest: outer\n        # Subtest: inner\n        ok 1 - deep\n        1..1\n    ok 1 - inner result\n    1..1\nok 1 - outer result\n"
+	input := "CRAP-2\n1::1\n    # Subtest: outer\n        # Subtest: inner\n        ok 1 - deep\n        1::1\n    ok 1 - inner result\n    1::1\nok 1 - outer result\n"
 	_, diags, summary := collectEvents(input)
 
 	for _, d := range diags {
@@ -261,7 +276,7 @@ func TestReaderNestedSubtest(t *testing.T) {
 }
 
 func TestReaderSubtestPlanMismatch(t *testing.T) {
-	input := "CRAP version 2\n1..1\n    ok 1 - inner\n    1..3\nok 1 - outer\n"
+	input := "CRAP-2\n1::1\n    ok 1 - inner\n    1::3\nok 1 - outer\n"
 	_, diags, _ := collectEvents(input)
 
 	found := false
@@ -276,7 +291,7 @@ func TestReaderSubtestPlanMismatch(t *testing.T) {
 }
 
 func TestReaderSkipAllPlan(t *testing.T) {
-	input := "CRAP version 2\n1..0 # skip all tests\n"
+	input := "CRAP-2\n1::0 # skip all tests\n"
 	_, diags, summary := collectEvents(input)
 
 	for _, d := range diags {
@@ -291,8 +306,8 @@ func TestReaderSkipAllPlan(t *testing.T) {
 
 func TestReaderANSIColoredStream(t *testing.T) {
 	// A TAP stream with ANSI color codes around status keywords and directives.
-	input := "CRAP version 2\n" +
-		"1..3\n" +
+	input := "CRAP-2\n" +
+		"1::3\n" +
 		"\033[32mok\033[0m 1 - passing test\n" +
 		"\033[31mnot ok\033[0m 2 - failing test\n" +
 		"\033[32mok\033[0m 3 - skipped \033[33m# SKIP\033[0m not needed\n"
@@ -342,8 +357,8 @@ func TestReaderANSIColoredStream(t *testing.T) {
 }
 
 func TestReaderANSIBailOut(t *testing.T) {
-	input := "CRAP version 2\n" +
-		"1..3\n" +
+	input := "CRAP-2\n" +
+		"1::3\n" +
 		"\033[32mok\033[0m 1 - a\n" +
 		"\033[31mBail out!\033[0m database down\n"
 
@@ -358,7 +373,7 @@ func TestReaderANSIBailOut(t *testing.T) {
 }
 
 func TestReaderStreamedOutputPragma(t *testing.T) {
-	input := "CRAP version 2\npragma +streamed-output\n1..1\n# compiling\n# linking\nok 1 - build\n"
+	input := "CRAP-2\npragma +streamed-output\n1::1\n# compiling\n# linking\nok 1 - build\n"
 	events, diags, summary := collectEvents(input)
 
 	for _, d := range diags {
@@ -387,7 +402,7 @@ func TestReaderStreamedOutputPragma(t *testing.T) {
 }
 
 func TestReaderStreamedOutputDeactivation(t *testing.T) {
-	input := "CRAP version 2\npragma +streamed-output\npragma -streamed-output\n1..1\nok 1 - a\n"
+	input := "CRAP-2\npragma +streamed-output\npragma -streamed-output\n1::1\nok 1 - a\n"
 	_, diags, _ := collectEvents(input)
 
 	found := false
@@ -402,7 +417,7 @@ func TestReaderStreamedOutputDeactivation(t *testing.T) {
 }
 
 func TestReaderStreamedOutputSubtestIsolation(t *testing.T) {
-	input := "CRAP version 2\npragma +streamed-output\n1..1\n# parent comment\n    # Subtest: child\n    # child comment\n    ok 1 - inner\n    1..1\nok 1 - child\n"
+	input := "CRAP-2\npragma +streamed-output\n1::1\n# parent comment\n    # Subtest: child\n    # child comment\n    ok 1 - inner\n    1::1\nok 1 - child\n"
 	events, diags, summary := collectEvents(input)
 
 	for _, d := range diags {
@@ -429,7 +444,7 @@ func TestReaderStreamedOutputSubtestIsolation(t *testing.T) {
 }
 
 func TestReaderStreamedOutputNotActiveByDefault(t *testing.T) {
-	input := "CRAP version 2\n1..1\n# just a comment\nok 1 - a\n"
+	input := "CRAP-2\n1::1\n# just a comment\nok 1 - a\n"
 	events, _, _ := collectEvents(input)
 
 	for _, ev := range events {
@@ -440,7 +455,7 @@ func TestReaderStreamedOutputNotActiveByDefault(t *testing.T) {
 }
 
 func TestReaderUnclosedYAML(t *testing.T) {
-	input := "CRAP version 2\n1..1\nnot ok 1 - fail\n  ---\n  message: broken\n"
+	input := "CRAP-2\n1::1\nnot ok 1 - fail\n  ---\n  message: broken\n"
 	_, diags, _ := collectEvents(input)
 
 	found := false
@@ -455,7 +470,7 @@ func TestReaderUnclosedYAML(t *testing.T) {
 }
 
 func TestReaderLocaleFormattedPlan(t *testing.T) {
-	input := "CRAP version 2\npragma +locale-formatting:en-US\n1..1,200\nok 1 - first\nok 2 - second\n"
+	input := "CRAP-2\npragma +locale-formatting:en-US\n1::1,200\nok 1 - first\nok 2 - second\n"
 	_, _, summary := collectEvents(input)
 	if summary.PlanCount != 1200 {
 		t.Errorf("expected plan count 1200, got %d", summary.PlanCount)
@@ -463,7 +478,7 @@ func TestReaderLocaleFormattedPlan(t *testing.T) {
 }
 
 func TestReaderLocaleFormattedTestPoint(t *testing.T) {
-	input := "CRAP version 2\npragma +locale-formatting:en-US\n1..2\nok 1 - first\nok 1,234 - big\n"
+	input := "CRAP-2\npragma +locale-formatting:en-US\n1::2\nok 1 - first\nok 1,234 - big\n"
 	events, _, _ := collectEvents(input)
 	for _, ev := range events {
 		if ev.Type == EventTestPoint && ev.TestPoint.Number == 1234 {
@@ -474,7 +489,7 @@ func TestReaderLocaleFormattedTestPoint(t *testing.T) {
 }
 
 func TestReaderLocaleGermanPlan(t *testing.T) {
-	input := "CRAP version 2\npragma +locale-formatting:de-DE\n1..1.200\nok 1 - test\n"
+	input := "CRAP-2\npragma +locale-formatting:de-DE\n1::1.200\nok 1 - test\n"
 	_, _, summary := collectEvents(input)
 	if summary.PlanCount != 1200 {
 		t.Errorf("expected plan count 1200 from German format, got %d", summary.PlanCount)
@@ -483,7 +498,7 @@ func TestReaderLocaleGermanPlan(t *testing.T) {
 
 func TestReaderLocaleFrenchPlan(t *testing.T) {
 	// fr-FR uses non-breaking space (U+00A0) as grouping separator in x/text
-	input := "CRAP version 2\npragma +locale-formatting:fr-FR\n1..1\u00a0200\nok 1 - test\n"
+	input := "CRAP-2\npragma +locale-formatting:fr-FR\n1::1\u00a0200\nok 1 - test\n"
 	_, _, summary := collectEvents(input)
 	if summary.PlanCount != 1200 {
 		t.Errorf("expected plan count 1200 from French format, got %d", summary.PlanCount)
@@ -492,8 +507,8 @@ func TestReaderLocaleFrenchPlan(t *testing.T) {
 
 func TestReaderLocaleFormattingSubtestScoping(t *testing.T) {
 	// Subtest without its own pragma should NOT use locale parsing
-	input := "CRAP version 2\npragma +locale-formatting:en-US\n1..1\n" +
-		"    # Subtest: child\n    1..1\n    ok 1 - inner\n" +
+	input := "CRAP-2\npragma +locale-formatting:en-US\n1::1\n" +
+		"    # Subtest: child\n    1::1\n    ok 1 - inner\n" +
 		"ok 1 - child\n"
 	_, diags, summary := collectEvents(input)
 	for _, d := range diags {
@@ -508,7 +523,7 @@ func TestReaderLocaleFormattingSubtestScoping(t *testing.T) {
 
 func TestReaderNoLocaleRejectsFormattedNumbers(t *testing.T) {
 	// Without locale pragma, comma in plan should cause parse issues
-	input := "CRAP version 2\n1..1,200\nok 1 - test\n"
+	input := "CRAP-2\n1::1,200\nok 1 - test\n"
 	_, _, summary := collectEvents(input)
 	if summary.PlanCount == 1200 {
 		t.Error("expected plan NOT to parse as 1200 without locale pragma")
@@ -516,7 +531,7 @@ func TestReaderNoLocaleRejectsFormattedNumbers(t *testing.T) {
 }
 
 func TestReaderYAMLPreservesANSI(t *testing.T) {
-	input := "CRAP version 2\n1..1\nnot ok 1 - fail\n  ---\n  message: \033[31merror\033[0m text\n  ...\n"
+	input := "CRAP-2\n1::1\nnot ok 1 - fail\n  ---\n  message: \033[31merror\033[0m text\n  ...\n"
 	events, diags, _ := collectEvents(input)
 
 	for _, d := range diags {
@@ -540,7 +555,7 @@ func TestReaderYAMLPreservesANSI(t *testing.T) {
 func TestReaderYAMLStripsANSIFromProtocolButNotContent(t *testing.T) {
 	// ANSI on protocol lines (test point) is stripped for classification,
 	// but ANSI in YAML values is preserved.
-	input := "CRAP version 2\n1..1\n\033[31mnot ok\033[0m 1 - fail\n  ---\n  output: \033[33mwarning\033[0m here\n  ...\n"
+	input := "CRAP-2\n1::1\n\033[31mnot ok\033[0m 1 - fail\n  ---\n  output: \033[33mwarning\033[0m here\n  ...\n"
 	events, diags, summary := collectEvents(input)
 
 	for _, d := range diags {

@@ -47,6 +47,7 @@ type Reader struct {
 	failed           int
 	skipped          int
 	todo             int
+	warned           int
 }
 
 // NewReader creates a new CRAP-2 reader from the given input.
@@ -168,7 +169,7 @@ func (r *Reader) Next() (Event, error) {
 			f.planCount = plan.Count
 			f.planLine = r.lineNum
 			if r.state == stateStart {
-				r.addDiag(SeverityError, "version-required", "first line must be CRAP version 2")
+				r.addDiag(SeverityError, "version-required", "first line must be CRAP-2")
 			}
 			if r.state == stateHeader {
 				r.state = stateBody
@@ -178,7 +179,7 @@ func (r *Reader) Next() (Event, error) {
 
 		case lineTestPoint:
 			if r.state == stateStart {
-				r.addDiag(SeverityError, "version-required", "first line must be CRAP version 2")
+				r.addDiag(SeverityError, "version-required", "first line must be CRAP-2")
 			}
 			r.state = stateBody
 			f := r.currentFrame()
@@ -196,12 +197,19 @@ func (r *Reader) Next() (Event, error) {
 				f.lastTestNumber = tp.Number
 			}
 
-			// Track pass/fail/skip/todo
+			// Track pass/fail/skip/todo/warn
 			switch tp.Directive {
 			case DirectiveSkip:
 				r.skipped++
 			case DirectiveTodo:
 				r.todo++
+			case DirectiveWarn:
+				r.warned++
+				if tp.OK {
+					r.passed++
+				} else {
+					r.failed++
+				}
 			default:
 				if tp.OK {
 					r.passed++
@@ -289,7 +297,7 @@ func (r *Reader) Next() (Event, error) {
 
 func (r *Reader) finalize() {
 	if r.state == stateStart {
-		r.addDiag(SeverityError, "version-required", "first line must be CRAP version 2")
+		r.addDiag(SeverityError, "version-required", "first line must be CRAP-2")
 	}
 	if r.state == stateYAML {
 		r.addDiag(SeverityError, "yaml-unclosed", "YAML block not closed at end of input")
@@ -339,6 +347,7 @@ func (r *Reader) Summary() Summary {
 		Failed:    r.failed,
 		Skipped:   r.skipped,
 		Todo:      r.todo,
+		Warned:    r.warned,
 	}
 
 	if len(r.stack) > 0 {
@@ -403,8 +412,8 @@ func (r *Reader) WriteTo(w io.Writer) (int64, error) {
 	if !summary.Valid {
 		status = "invalid"
 	}
-	line := fmt.Sprintf("\n%s: %d tests (%d passed, %d failed, %d skipped, %d todo)\n",
-		status, summary.TotalTests, summary.Passed, summary.Failed, summary.Skipped, summary.Todo)
+	line := fmt.Sprintf("\n%s: %d tests (%d passed, %d failed, %d skipped, %d todo, %d warned)\n",
+		status, summary.TotalTests, summary.Passed, summary.Failed, summary.Skipped, summary.Todo, summary.Warned)
 	n, err := io.WriteString(w, line)
 	total += int64(n)
 	return total, err

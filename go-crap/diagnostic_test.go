@@ -25,6 +25,7 @@ func TestDirectiveString(t *testing.T) {
 		{DirectiveNone, ""},
 		{DirectiveSkip, "SKIP"},
 		{DirectiveTodo, "TODO"},
+		{DirectiveWarn, "WARN"},
 	}
 	for _, tt := range tests {
 		if got := tt.d.String(); got != tt.want {

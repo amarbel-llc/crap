@@ -291,8 +291,8 @@ func TestConvertExecParallelWithStatusSequential(t *testing.T) {
 
 	out := buf.String()
 	clean := stripANSIAndControl(out)
-	if !strings.Contains(out, "pragma +status-line") {
-		t.Errorf("expected status-line pragma, got:\n%s", clean)
+	if strings.Contains(out, "pragma +status-line") {
+		t.Errorf("status-line is default, should NOT emit pragma, got:\n%s", clean)
 	}
 	if !strings.Contains(clean, "ok 1 - echo hello") {
 		t.Errorf("expected ok for first command, got:\n%s", clean)
@@ -319,8 +319,8 @@ func TestConvertExecParallelWithStatusParallel(t *testing.T) {
 	}
 
 	out := buf.String()
-	if !strings.Contains(out, "pragma +status-line") {
-		t.Errorf("expected status-line pragma, got:\n%s", out)
+	if strings.Contains(out, "pragma +status-line") {
+		t.Errorf("status-line is default, should NOT emit pragma, got:\n%s", out)
 	}
 	if !strings.Contains(out, "running") {
 		t.Errorf("expected 'running' in status line for parallel mode, got:\n%s", out)
@@ -360,8 +360,8 @@ func TestConvertExecSingleCommand(t *testing.T) {
 	if !strings.Contains(clean, "ok 1 - echo hello") {
 		t.Errorf("expected ok test point, got:\n%s", clean)
 	}
-	if !strings.Contains(clean, "1..1") {
-		t.Errorf("expected plan 1..1, got:\n%s", clean)
+	if !strings.Contains(clean, "1::1") {
+		t.Errorf("expected plan 1::1, got:\n%s", clean)
 	}
 }
 
@@ -386,8 +386,8 @@ func TestConvertExecMultipleArgs(t *testing.T) {
 	if !strings.Contains(clean, "ok 3 - echo c") {
 		t.Errorf("expected third test point, got:\n%s", clean)
 	}
-	if !strings.Contains(clean, "1..3") {
-		t.Errorf("expected plan 1..3, got:\n%s", clean)
+	if !strings.Contains(clean, "1::3") {
+		t.Errorf("expected plan 1::3, got:\n%s", clean)
 	}
 }
 
@@ -433,8 +433,8 @@ func TestConvertExecStatusLineShowsOutput(t *testing.T) {
 	)
 
 	out := buf.String()
-	if !strings.Contains(out, "pragma +status-line") {
-		t.Errorf("expected status-line pragma, got:\n%s", out)
+	if strings.Contains(out, "pragma +status-line") {
+		t.Errorf("status-line is default, should NOT emit pragma, got:\n%s", out)
 	}
 	clean := stripANSIAndControl(out)
 	if !strings.Contains(clean, "status-visible") || !strings.Contains(out, "# ") {

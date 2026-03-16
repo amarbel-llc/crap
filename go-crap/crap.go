@@ -35,18 +35,18 @@ type Writer struct {
 }
 
 func NewWriter(w io.Writer) *Writer {
-	fmt.Fprintln(w, "CRAP version 2")
+	fmt.Fprintln(w, "CRAP-2")
 	return &Writer{w: w}
 }
 
 // NewColorWriter creates a Writer that colorizes ok/not ok when color is true.
 func NewColorWriter(w io.Writer, color bool) *Writer {
-	fmt.Fprintln(w, "CRAP version 2")
+	fmt.Fprintln(w, "CRAP-2")
 	return &Writer{w: w, color: color}
 }
 
 func NewLocaleWriter(w io.Writer, locale language.Tag) *Writer {
-	fmt.Fprintln(w, "CRAP version 2")
+	fmt.Fprintln(w, "CRAP-2")
 	fmt.Fprintf(w, "pragma +locale-formatting:%s\n", locale)
 	return &Writer{
 		w:       w,
@@ -88,6 +88,13 @@ func (tw *Writer) colorTodo() string {
 		return ansiYellow + "# TODO" + ansiReset
 	}
 	return "# TODO"
+}
+
+func (tw *Writer) colorWarn() string {
+	if tw.color {
+		return ansiYellow + "# WARN" + ansiReset
+	}
+	return "# WARN"
 }
 
 func (tw *Writer) colorBailOut() string {
@@ -170,8 +177,23 @@ func (tw *Writer) Todo(description, reason string) int {
 	return tw.n
 }
 
+func (tw *Writer) Warn(description, reason string) int {
+	tw.clearStatusIfActive()
+	tw.n++
+	fmt.Fprintf(tw.w, "%s %s - %s %s %s\n", tw.colorOk(), tw.formatNumber(tw.n), description, tw.colorWarn(), reason)
+	return tw.n
+}
+
+func (tw *Writer) WarnNotOk(description, reason string) int {
+	tw.clearStatusIfActive()
+	tw.n++
+	tw.failed = true
+	fmt.Fprintf(tw.w, "%s %s - %s %s %s\n", tw.colorNotOk(), tw.formatNumber(tw.n), description, tw.colorWarn(), reason)
+	return tw.n
+}
+
 func (tw *Writer) PlanAhead(n int) {
-	fmt.Fprintf(tw.w, "1..%s\n", tw.formatNumber(n))
+	fmt.Fprintf(tw.w, "1::%s\n", tw.formatNumber(n))
 	tw.planEmitted = true
 }
 
@@ -180,7 +202,7 @@ func (tw *Writer) Plan() {
 		return
 	}
 	tw.planEmitted = true
-	fmt.Fprintf(tw.w, "1..%s\n", tw.formatNumber(tw.n))
+	fmt.Fprintf(tw.w, "1::%s\n", tw.formatNumber(tw.n))
 }
 
 func (tw *Writer) BailOut(reason string) {
@@ -212,7 +234,6 @@ func (tw *Writer) StreamedOutput(text string) {
 
 func (tw *Writer) EnableTTYBuildLastLine() {
 	tw.ttyBuildLastLine = true
-	fmt.Fprintln(tw.w, "pragma +status-line")
 }
 
 func (tw *Writer) UpdateLastLine(text string) {
@@ -346,10 +367,7 @@ func (tw *Writer) Subtest(name string) *Writer {
 	if tw.printer != nil {
 		fmt.Fprintf(iw, "pragma +locale-formatting:%s\n", tw.locale)
 	}
-	if tw.streamedOutput {
-		child.streamedOutput = true
-		fmt.Fprintln(iw, "pragma +streamed-output")
-	}
+	child.streamedOutput = tw.streamedOutput
 	return child
 }
 
@@ -358,6 +376,7 @@ type TestPoint struct {
 	Ok          bool
 	Skip        string
 	Todo        string
+	Warn        string
 	Diagnostics *Diagnostics
 	Subtests    func(*Writer)
 }
@@ -375,6 +394,12 @@ func (tw *Writer) WriteAll(tests iter.Seq[TestPoint]) {
 			tw.SkipDiag(tp.Description, tp.Skip, tp.Diagnostics)
 		} else if tp.Todo != "" {
 			tw.Todo(tp.Description, tp.Todo)
+		} else if tp.Warn != "" {
+			if tp.Ok {
+				tw.Warn(tp.Description, tp.Warn)
+			} else {
+				tw.WarnNotOk(tp.Description, tp.Warn)
+			}
 		} else if tp.Ok {
 			tw.n++
 			fmt.Fprintf(tw.w, "%s %s - %s\n", tw.colorOk(), tw.formatNumber(tw.n), tp.Description)

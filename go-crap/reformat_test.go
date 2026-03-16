@@ -7,20 +7,20 @@ import (
 )
 
 func TestReformatTAPAddsVersionHeader(t *testing.T) {
-	input := "1..1\nok 1 - pass\n"
+	input := "1::1\nok 1 - pass\n"
 	var buf bytes.Buffer
 	ReformatTAP(strings.NewReader(input), &buf, false)
 	lines := strings.SplitN(buf.String(), "\n", 2)
-	if lines[0] != "CRAP version 2" {
-		t.Errorf("expected first line CRAP version 2, got %q", lines[0])
+	if lines[0] != "CRAP-2" {
+		t.Errorf("expected first line CRAP-2, got %q", lines[0])
 	}
 }
 
 func TestReformatTAPDropsExistingVersionLine(t *testing.T) {
-	input := "CRAP version 2\n1..1\nok 1 - pass\n"
+	input := "CRAP-2\n1::1\nok 1 - pass\n"
 	var buf bytes.Buffer
 	ReformatTAP(strings.NewReader(input), &buf, false)
-	count := strings.Count(buf.String(), "CRAP version 2")
+	count := strings.Count(buf.String(), "CRAP-2")
 	if count != 1 {
 		t.Errorf("expected exactly one version line, got %d in:\n%s", count, buf.String())
 	}
@@ -99,11 +99,11 @@ func TestReformatTAPNoColorWhenDisabled(t *testing.T) {
 }
 
 func TestReformatTAPPassesThroughOtherLines(t *testing.T) {
-	input := "1..3\n# comment\nok 1 - pass\n  ---\n  message: hello\n  ...\nnot ok 2 - fail\nok 3 - last\n"
+	input := "1::3\n# comment\nok 1 - pass\n  ---\n  message: hello\n  ...\nnot ok 2 - fail\nok 3 - last\n"
 	var buf bytes.Buffer
 	ReformatTAP(strings.NewReader(input), &buf, false)
 	out := buf.String()
-	if !strings.Contains(out, "1..3\n") {
+	if !strings.Contains(out, "1::3\n") {
 		t.Errorf("expected plan line passthrough, got:\n%s", out)
 	}
 	if !strings.Contains(out, "# comment\n") {
@@ -121,7 +121,7 @@ func TestReformatTAPPassesThroughOtherLines(t *testing.T) {
 }
 
 func TestReformatTAPOutputValidatesWithReader(t *testing.T) {
-	input := "1..3\nok 1 - pass\nnot ok 2 - fail\nok 3 - skip # skip lazy\n"
+	input := "1::3\nok 1 - pass\nnot ok 2 - fail\nok 3 - skip # skip lazy\n"
 	var buf bytes.Buffer
 	ReformatTAP(strings.NewReader(input), &buf, false)
 	reader := NewReader(strings.NewReader(buf.String()))

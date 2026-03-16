@@ -138,8 +138,9 @@ func TestCargoConvertEmitsPragmaAndStreamedOutput(t *testing.T) {
 	ConvertCargoTest(strings.NewReader(prettyOutput), &buf, false, false, false)
 	out := buf.String()
 
-	if !strings.Contains(out, "pragma +streamed-output") {
-		t.Errorf("expected pragma +streamed-output in output:\n%s", out)
+	// streamed-output is enabled by default, should NOT be explicitly emitted
+	if strings.Contains(out, "pragma +streamed-output") {
+		t.Errorf("streamed-output is default, should NOT emit pragma, got:\n%s", out)
 	}
 
 	// Streamed output should appear before not ok
@@ -192,8 +193,8 @@ func TestCargoConvertMultipleSuites(t *testing.T) {
 	if !strings.Contains(out, "# Subtest: tests/integration.rs") {
 		t.Errorf("expected integration suite subtest:\n%s", out)
 	}
-	if !strings.Contains(out, "1..2") {
-		t.Errorf("expected plan 1..2:\n%s", out)
+	if !strings.Contains(out, "1::2") {
+		t.Errorf("expected plan 1::2:\n%s", out)
 	}
 
 	reader := NewReader(strings.NewReader(out))
@@ -298,8 +299,8 @@ func TestCargoConvertMixedEmptyAndRealSuites(t *testing.T) {
 	if !strings.Contains(out, "# SKIP") {
 		t.Errorf("expected SKIP for empty suite:\n%s", out)
 	}
-	if !strings.Contains(out, "1..2") {
-		t.Errorf("expected plan 1..2:\n%s", out)
+	if !strings.Contains(out, "1::2") {
+		t.Errorf("expected plan 1::2:\n%s", out)
 	}
 
 	reader := NewReader(strings.NewReader(out))

@@ -53,7 +53,7 @@ var (
 func ConvertCargoTest(r io.Reader, w io.Writer, verbose bool, skipEmpty bool, color bool) int {
 	scanner := bufio.NewScanner(r)
 	tw := NewColorWriter(w, color)
-	tw.Pragma("streamed-output", true)
+	tw.streamedOutput = true
 	exitCode := 0
 
 	var suiteCount int

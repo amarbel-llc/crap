@@ -9,10 +9,10 @@ func TestParsePlan(t *testing.T) {
 		reason  string
 		wantErr bool
 	}{
-		{"1..5", 5, "", false},
-		{"1..0", 0, "", false},
-		{"1..0 # skip all", 0, "skip all", false},
-		{"1..100", 100, "", false},
+		{"1::5", 5, "", false},
+		{"1::0", 0, "", false},
+		{"1::0 # skip all", 0, "skip all", false},
+		{"1::100", 100, "", false},
 	}
 	for _, tt := range tests {
 		p, err := parsePlan(tt.line)
@@ -50,6 +50,8 @@ func TestParseTestPoint(t *testing.T) {
 		{"ok - no number", true, 0, "no number", DirectiveNone, ""},
 		{"not ok - also no number", false, 0, "also no number", DirectiveNone, ""},
 		{"ok 1 - has \\# escaped hash", true, 1, "has # escaped hash", DirectiveNone, ""},
+		{"ok 5 - deprecation # WARN uses old API", true, 5, "deprecation", DirectiveWarn, "uses old API"},
+		{"not ok 6 - critical # WARN something wrong", false, 6, "critical", DirectiveWarn, "something wrong"},
 	}
 	for _, tt := range tests {
 		tp, _ := parseTestPoint(tt.line)
@@ -136,6 +138,9 @@ func TestDirectiveCase(t *testing.T) {
 		{"ok 1 - x # TODO reason", DirectiveTodo},
 		{"ok 1 - x # todo reason", DirectiveTodo},
 		{"ok 1 - x # Todo reason", DirectiveTodo},
+		{"ok 1 - x # WARN reason", DirectiveWarn},
+		{"ok 1 - x # warn reason", DirectiveWarn},
+		{"ok 1 - x # Warn reason", DirectiveWarn},
 	}
 	for _, tt := range tests {
 		tp, _ := parseTestPoint(tt.line)

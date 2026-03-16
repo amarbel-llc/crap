@@ -7,9 +7,9 @@ func TestClassifyVersion(t *testing.T) {
 		line string
 		want lineKind
 	}{
-		{"CRAP version 2", lineVersion},
+		{"CRAP-2", lineVersion},
 		{"TAP version 13", lineUnknown},
-		{"CRAP version 2 ", lineUnknown},
+		{"CRAP-2 ", lineUnknown},
 		{"tap version 14", lineUnknown},
 	}
 	for _, tt := range tests {
@@ -24,12 +24,12 @@ func TestClassifyPlan(t *testing.T) {
 		line string
 		want lineKind
 	}{
-		{"1..5", linePlan},
-		{"1..0", linePlan},
-		{"1..0 # skip all", linePlan},
-		{"1..100", linePlan},
-		{"2..5", lineUnknown},
-		{"1..", lineUnknown},
+		{"1::5", linePlan},
+		{"1::0", linePlan},
+		{"1::0 # skip all", linePlan},
+		{"1::100", linePlan},
+		{"2::5", lineUnknown},
+		{"1::", lineUnknown},
 	}
 	for _, tt := range tests {
 		if got := classifyLine(tt.line); got != tt.want {

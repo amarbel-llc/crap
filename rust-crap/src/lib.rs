@@ -111,12 +111,9 @@ impl<'a> CrapWriterBuilder<'a> {
     pub fn build(self) -> io::Result<CrapWriter<'a>> {
         // Create formatter before any I/O to avoid partial output on error
         let config = self.build_config()?;
-        writeln!(self.w, "CRAP version 2")?;
+        writeln!(self.w, "CRAP-2")?;
         if let Some(ref locale) = config.locale {
             writeln!(self.w, "pragma +locale-formatting:{locale}")?;
-        }
-        if config.status_line {
-            writeln!(self.w, "pragma +status-line")?;
         }
         Ok(CrapWriter {
             w: self.w,
@@ -172,6 +169,14 @@ fn directive_todo(color: bool) -> &'static str {
         "\x1b[33mTODO\x1b[0m"
     } else {
         "TODO"
+    }
+}
+
+fn directive_warn(color: bool) -> &'static str {
+    if color {
+        "\x1b[33mWARN\x1b[0m"
+    } else {
+        "WARN"
     }
 }
 
@@ -348,6 +353,39 @@ impl<'a> CrapWriter<'a> {
         Ok(self.counter)
     }
 
+    pub fn warn(&mut self, desc: &str, reason: &str) -> io::Result<usize> {
+        self.clear_status_if_active()?;
+        self.counter += 1;
+        let num = self.config.format_number(self.counter);
+        writeln!(
+            self.w,
+            "{} {} - {} # {} {}",
+            status_ok(self.config.color()),
+            num,
+            desc,
+            directive_warn(self.config.color()),
+            reason
+        )?;
+        Ok(self.counter)
+    }
+
+    pub fn warn_not_ok(&mut self, desc: &str, reason: &str) -> io::Result<usize> {
+        self.clear_status_if_active()?;
+        self.counter += 1;
+        self.failed = true;
+        let num = self.config.format_number(self.counter);
+        writeln!(
+            self.w,
+            "{} {} - {} # {} {}",
+            status_not_ok(self.config.color()),
+            num,
+            desc,
+            directive_warn(self.config.color()),
+            reason
+        )?;
+        Ok(self.counter)
+    }
+
     pub fn bail_out(&mut self, reason: &str) -> io::Result<()> {
         self.clear_status_if_active()?;
         writeln!(self.w, "{} {}", token_bail_out(self.config.color()), reason)
@@ -402,18 +440,18 @@ impl<'a> CrapWriter<'a> {
         }
         self.plan_emitted = true;
         let num = self.config.format_number(self.counter);
-        writeln!(self.w, "1..{}", num)
+        writeln!(self.w, "1::{}", num)
     }
 
     pub fn plan_ahead(&mut self, n: usize) -> io::Result<()> {
         self.plan_emitted = true;
         let num = self.config.format_number(n);
-        writeln!(self.w, "1..{}", num)
+        writeln!(self.w, "1::{}", num)
     }
 
     pub fn plan_skip(&mut self, reason: &str) -> io::Result<()> {
         self.plan_emitted = true;
-        writeln!(self.w, "1..0 # SKIP {}", reason)
+        writeln!(self.w, "1::0 # SKIP {}", reason)
     }
 
     pub fn test_point(&mut self, result: &TestResult) -> io::Result<()> {
@@ -476,9 +514,6 @@ impl<'a> CrapWriter<'a> {
         };
         if let Some(ref locale) = child.config.locale {
             writeln!(child.w, "pragma +locale-formatting:{locale}")?;
-        }
-        if child.config.streamed_output {
-            writeln!(child.w, "pragma +streamed-output")?;
         }
         f(&mut child)
     }
@@ -653,11 +688,11 @@ fn has_yaml_block(result: &TestResult) -> bool {
 // --- Free functions (original API, unchanged) ---
 
 pub fn write_version(w: &mut impl Write) -> io::Result<()> {
-    writeln!(w, "CRAP version 2")
+    writeln!(w, "CRAP-2")
 }
 
 pub fn write_plan(w: &mut impl Write, count: usize) -> io::Result<()> {
-    writeln!(w, "1..{count}")
+    writeln!(w, "1::{count}")
 }
 
 pub fn write_test_point(w: &mut impl Write, result: &TestResult) -> io::Result<()> {
@@ -716,7 +751,11 @@ pub fn write_pragma(w: &mut impl Write, key: &str, enabled: bool) -> io::Result<
 }
 
 pub fn write_plan_skip(w: &mut impl Write, reason: &str) -> io::Result<()> {
-    writeln!(w, "1..0 # SKIP {reason}")
+    writeln!(w, "1::0 # SKIP {reason}")
+}
+
+pub fn write_warn(w: &mut impl Write, num: usize, desc: &str, reason: &str) -> io::Result<()> {
+    writeln!(w, "ok {num} - {desc} # WARN {reason}")
 }
 
 pub fn write_plan_locale(
@@ -726,7 +765,7 @@ pub fn write_plan_locale(
 ) -> io::Result<()> {
     let decimal = Decimal::from(count as i64);
     let formatted = fmt.format(&decimal);
-    writeln!(w, "1..{formatted}")
+    writeln!(w, "1::{formatted}")
 }
 
 const MONKEY_FRAMES: &[&str] = &["🙈", "🙉", "🙊"];
@@ -924,21 +963,21 @@ mod tests {
     fn version_line() {
         let mut buf = Vec::new();
         write_version(&mut buf).unwrap();
-        assert_eq!(String::from_utf8(buf).unwrap(), "CRAP version 2\n");
+        assert_eq!(String::from_utf8(buf).unwrap(), "CRAP-2\n");
     }
 
     #[test]
     fn plan_line() {
         let mut buf = Vec::new();
         write_plan(&mut buf, 3).unwrap();
-        assert_eq!(String::from_utf8(buf).unwrap(), "1..3\n");
+        assert_eq!(String::from_utf8(buf).unwrap(), "1::3\n");
     }
 
     #[test]
     fn plan_zero() {
         let mut buf = Vec::new();
         write_plan(&mut buf, 0).unwrap();
-        assert_eq!(String::from_utf8(buf).unwrap(), "1..0\n");
+        assert_eq!(String::from_utf8(buf).unwrap(), "1::0\n");
     }
 
     #[test]
@@ -1078,7 +1117,7 @@ mod tests {
         write_plan_skip(&mut buf, "not supported on this platform").unwrap();
         assert_eq!(
             String::from_utf8(buf).unwrap(),
-            "1..0 # SKIP not supported on this platform\n"
+            "1::0 # SKIP not supported on this platform\n"
         );
     }
 
@@ -1088,7 +1127,7 @@ mod tests {
     fn writer_emits_version() {
         let mut buf = Vec::new();
         let _tw = CrapWriterBuilder::new(&mut buf).build().unwrap();
-        assert_eq!(String::from_utf8(buf).unwrap(), "CRAP version 2\n");
+        assert_eq!(String::from_utf8(buf).unwrap(), "CRAP-2\n");
     }
 
     #[test]
@@ -1127,6 +1166,38 @@ mod tests {
         assert!(out.contains("  message: \"segfault\"\n"));
         assert!(out.contains("  severity: \"fail\"\n"));
         assert!(out.contains("  ...\n"));
+    }
+
+    #[test]
+    fn writer_warn() {
+        let mut buf = Vec::new();
+        let mut tw = CrapWriterBuilder::new(&mut buf).build().unwrap();
+        let n = tw.warn("slow query", "took 3.2s").unwrap();
+        assert_eq!(n, 1);
+        assert!(!tw.has_failures());
+        let out = String::from_utf8(buf).unwrap();
+        assert!(out.contains("ok 1 - slow query # WARN took 3.2s\n"));
+    }
+
+    #[test]
+    fn writer_warn_not_ok() {
+        let mut buf = Vec::new();
+        let mut tw = CrapWriterBuilder::new(&mut buf).build().unwrap();
+        let n = tw.warn_not_ok("flaky", "intermittent").unwrap();
+        assert_eq!(n, 1);
+        assert!(tw.has_failures());
+        let out = String::from_utf8(buf).unwrap();
+        assert!(out.contains("not ok 1 - flaky # WARN intermittent\n"));
+    }
+
+    #[test]
+    fn warn_free_function() {
+        let mut buf = Vec::new();
+        write_warn(&mut buf, 7, "database query", "took 3.2s, exceeds 1s threshold").unwrap();
+        assert_eq!(
+            String::from_utf8(buf).unwrap(),
+            "ok 7 - database query # WARN took 3.2s, exceeds 1s threshold\n"
+        );
     }
 
     #[test]
@@ -1209,7 +1280,7 @@ mod tests {
         tw.ok("two").unwrap();
         tw.plan().unwrap();
         let out = String::from_utf8(buf).unwrap();
-        assert!(out.ends_with("1..2\n"));
+        assert!(out.ends_with("1::2\n"));
     }
 
     #[test]
@@ -1220,7 +1291,7 @@ mod tests {
         tw.plan().unwrap();
         tw.plan().unwrap();
         let out = String::from_utf8(buf).unwrap();
-        assert_eq!(out.matches("1..1").count(), 1);
+        assert_eq!(out.matches("1::1").count(), 1);
     }
 
     #[test]
@@ -1229,7 +1300,7 @@ mod tests {
         let mut tw = CrapWriterBuilder::new(&mut buf).build().unwrap();
         tw.plan_ahead(5).unwrap();
         let out = String::from_utf8(buf).unwrap();
-        assert!(out.contains("1..5\n"));
+        assert!(out.contains("1::5\n"));
     }
 
     #[test]
@@ -1238,7 +1309,7 @@ mod tests {
         let mut tw = CrapWriterBuilder::new(&mut buf).build().unwrap();
         tw.plan_skip("missing dependency").unwrap();
         let out = String::from_utf8(buf).unwrap();
-        assert!(out.contains("1..0 # SKIP missing dependency\n"));
+        assert!(out.contains("1::0 # SKIP missing dependency\n"));
     }
 
     #[test]
@@ -1279,9 +1350,9 @@ mod tests {
         assert!(out.contains("    # Subtest: group\n"));
         assert!(out.contains("    ok 1 - nested one\n"));
         assert!(out.contains("    ok 2 - nested two\n"));
-        assert!(out.contains("    1..2\n"));
+        assert!(out.contains("    1::2\n"));
         assert!(out.contains("ok 1 - group\n"));
-        assert!(out.ends_with("1..1\n"));
+        assert!(out.ends_with("1::1\n"));
     }
 
     #[test]
@@ -1305,9 +1376,9 @@ mod tests {
         assert!(out.contains("    ok 1 - before\n"));
         assert!(out.contains("        # Subtest: inner\n"));
         assert!(out.contains("        ok 1 - deep\n"));
-        assert!(out.contains("        1..1\n"));
+        assert!(out.contains("        1::1\n"));
         assert!(out.contains("    ok 2 - inner\n"));
-        assert!(out.contains("    1..2\n"));
+        assert!(out.contains("    1::2\n"));
     }
 
     #[test]
@@ -1353,9 +1424,11 @@ mod tests {
         tw.ok("group").unwrap();
         tw.plan().unwrap();
         let out = String::from_utf8(buf).unwrap();
+        // Streamed output is inherited internally; no pragma line needed in subtest
+        // since it's enabled by default in CRAP-2
         assert!(
-            out.contains("    pragma +streamed-output\n"),
-            "expected subtest to contain pragma +streamed-output, got:\n{out}"
+            out.contains("    # compiling\n"),
+            "expected subtest to contain comment, got:\n{out}"
         );
     }
 
@@ -1732,8 +1805,8 @@ mod tests {
         tw.plan_ahead(10000).unwrap();
         let out = String::from_utf8(buf).unwrap();
         assert!(
-            out.contains("1..10,000\n"),
-            "expected '1..10,000', got: {out}"
+            out.contains("1::10,000\n"),
+            "expected '1::10,000', got: {out}"
         );
     }
 
@@ -1748,8 +1821,8 @@ mod tests {
         tw.plan_ahead(10000).unwrap();
         let out = String::from_utf8(buf).unwrap();
         assert!(
-            out.contains("1..10.000\n"),
-            "expected '1..10.000', got: {out}"
+            out.contains("1::10.000\n"),
+            "expected '1::10.000', got: {out}"
         );
     }
 
@@ -1787,7 +1860,7 @@ mod tests {
             "expected subtest locale pragma, got:\n{out}"
         );
         assert!(
-            out.contains("    1..10,000\n"),
+            out.contains("    1::10,000\n"),
             "expected subtest formatted plan, got:\n{out}"
         );
     }
@@ -1798,7 +1871,7 @@ mod tests {
         let locale: Locale = "en-US".parse().unwrap();
         let formatter = DecimalFormatter::try_new(locale.into(), Default::default()).unwrap();
         write_plan_locale(&mut buf, 10000, &formatter).unwrap();
-        assert_eq!(String::from_utf8(buf).unwrap(), "1..10,000\n");
+        assert_eq!(String::from_utf8(buf).unwrap(), "1::10,000\n");
     }
 
     // --- ANSI in YAML Output Blocks amendment tests ---
@@ -1949,7 +2022,7 @@ mod tests {
             color = tw.config.color();
         }
         let out = String::from_utf8(buf).unwrap();
-        assert!(out.contains("CRAP version 2\n"));
+        assert!(out.contains("CRAP-2\n"));
         assert!(!color);
         assert_eq!(count, 0);
     }
@@ -1976,7 +2049,7 @@ mod tests {
         tw.plan_ahead(10000).unwrap();
         let out = String::from_utf8(buf).unwrap();
         assert!(out.contains("pragma +locale-formatting:en-US\n"));
-        assert!(out.contains("1..10,000\n"));
+        assert!(out.contains("1::10,000\n"));
     }
 
     #[test]
@@ -1993,7 +2066,7 @@ mod tests {
         let out = String::from_utf8(buf).unwrap();
         assert!(out.contains("pragma +locale-formatting:en-US\n"));
         assert!(out.contains("\x1b[32mok\x1b[0m 1 - test\n"));
-        assert!(out.contains("1..10,000\n"));
+        assert!(out.contains("1::10,000\n"));
     }
 
     #[test]
@@ -2022,7 +2095,7 @@ mod tests {
         let out = String::from_utf8(buf).unwrap();
         assert!(!out.contains("CRAP version"));
         assert!(!out.contains("pragma"));
-        assert!(out.contains("1..10,000\n"));
+        assert!(out.contains("1::10,000\n"));
     }
 
     #[test]
@@ -2037,7 +2110,7 @@ mod tests {
         tw.plan_ahead(10000).unwrap();
         let out = String::from_utf8(buf).unwrap();
         assert!(!out.contains("pragma"));
-        assert!(out.contains("1..10000\n"));
+        assert!(out.contains("1::10000\n"));
     }
 
     #[test]
@@ -2108,7 +2181,7 @@ mod tests {
         let out = String::from_utf8(buf).unwrap();
         // C locale should not parse as ICU locale, so no formatting
         assert!(!out.contains("pragma"));
-        assert!(out.contains("1..10000\n"));
+        assert!(out.contains("1::10000\n"));
 
         // Restore
         match orig_all {
@@ -2145,7 +2218,7 @@ mod tests {
         // en_US should parse after underscore-to-hyphen normalization,
         // producing formatted output with grouping separators
         assert!(out.contains("pragma"));
-        assert!(out.contains("1..10,000\n"));
+        assert!(out.contains("1::10,000\n"));
 
         // Restore
         match orig_all {
@@ -2178,10 +2251,10 @@ mod tests {
         }
         tw.plan().unwrap();
         let out = String::from_utf8(buf).unwrap();
-        assert!(out.starts_with("CRAP version 2\n"));
+        assert!(out.starts_with("CRAP-2\n"));
         assert!(out.contains("pragma +locale-formatting:en-US\n"));
         assert!(out.contains("\x1b[32mok\x1b[0m 1,234 - test\n"));
-        assert!(out.contains("1..1,234\n"));
+        assert!(out.contains("1::1,234\n"));
     }
 
     #[test]
@@ -2211,7 +2284,7 @@ mod tests {
             "expected subtest color, got:\n{out}"
         );
         assert!(
-            out.contains("    1..10,000\n"),
+            out.contains("    1::10,000\n"),
             "expected subtest locale plan, got:\n{out}"
         );
         assert!(out.contains("\x1b[32mok\x1b[0m 1 - nested\n"));
@@ -2244,7 +2317,7 @@ mod tests {
     }
 
     #[test]
-    fn writer_status_line_pragma() {
+    fn writer_status_line_enabled_by_default() {
         let mut buf = Vec::new();
         let mut tw = CrapWriterBuilder::new(&mut buf)
             .status_line(true)
@@ -2252,9 +2325,10 @@ mod tests {
             .unwrap();
         tw.ok("test").unwrap();
         let out = String::from_utf8(buf).unwrap();
+        // Status-line is enabled by default in CRAP-2; no pragma +status-line emitted
         assert!(
-            out.contains("pragma +status-line\n"),
-            "expected status-line pragma, got:\n{out}"
+            !out.contains("pragma +status-line"),
+            "should not emit pragma +status-line (enabled by default), got:\n{out}"
         );
     }
 

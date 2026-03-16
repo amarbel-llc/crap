@@ -56,7 +56,7 @@ func ConvertGoTest(r io.Reader, w io.Writer, verbose bool, skipEmpty bool, color
 	var packageOrder []string
 
 	tw := NewColorWriter(w, color)
-	tw.Pragma("streamed-output", true)
+	tw.streamedOutput = true
 	exitCode := 0
 
 	for {

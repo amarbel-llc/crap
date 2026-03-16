@@ -22,7 +22,7 @@ const (
 )
 
 var (
-	planRegexp      = regexp.MustCompile(`^1\.\.([\d,.\x{00a0}\x{202f} ]+)(\s+#\s+(.*))?$`)
+	planRegexp      = regexp.MustCompile(`^1::([\d,.\x{00a0}\x{202f} ]+)(\s+#\s+(.*))?$`)
 	testPointRegexp = regexp.MustCompile(`^(not )?ok\b`)
 	pragmaRegexp    = regexp.MustCompile(`^pragma\s+[+-]\w`)
 	// csiRegexp matches all CSI escape sequences (ESC [ ... <final byte>),
@@ -68,7 +68,7 @@ func HasVisibleContent(s string) bool {
 }
 
 func classifyLine(line string) lineKind {
-	if line == "CRAP version 2" {
+	if line == "CRAP-2" {
 		return lineVersion
 	}
 

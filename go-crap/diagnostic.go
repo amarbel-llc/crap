@@ -34,6 +34,7 @@ const (
 	DirectiveNone Directive = iota
 	DirectiveSkip
 	DirectiveTodo
+	DirectiveWarn
 )
 
 func (d Directive) String() string {
@@ -42,6 +43,8 @@ func (d Directive) String() string {
 		return "SKIP"
 	case DirectiveTodo:
 		return "TODO"
+	case DirectiveWarn:
+		return "WARN"
 	default:
 		return ""
 	}
@@ -112,6 +115,7 @@ type Summary struct {
 	Failed     int  `json:"failed"`
 	Skipped    int  `json:"skipped"`
 	Todo       int  `json:"todo"`
+	Warned     int  `json:"warned"`
 	BailedOut  bool `json:"bailed_out"`
 	PlanCount  int  `json:"plan_count"`
 	Valid      bool `json:"valid"`

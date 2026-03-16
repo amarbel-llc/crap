@@ -1,6 +1,15 @@
 package crap
 
-import "strings"
+import (
+	"bufio"
+	"context"
+	"fmt"
+	"io"
+	"os/exec"
+	"strings"
+	"sync"
+	"syscall"
+)
 
 // GitPhase holds lines accumulated during one semantic phase of a git command.
 type GitPhase struct {
@@ -68,6 +77,157 @@ func (p *GitPhaseParser) Phases() []GitPhase {
 		}
 	}
 	return result
+}
+
+// parserForSubcommand returns a phase parser for recognized git subcommands,
+// or nil for generic fallback.
+func parserForSubcommand(args []string) *GitPhaseParser {
+	if len(args) == 0 {
+		return nil
+	}
+	switch args[0] {
+	case "pull":
+		return NewGitPullParser()
+	case "push":
+		return NewGitPushParser()
+	default:
+		return nil
+	}
+}
+
+// ConvertGit runs git with args and writes CRAP-2 output. For recognized
+// subcommands (pull, push) it emits semantic phase test points. For all
+// others it emits a single test point based on exit code.
+// Returns the git exit code.
+func ConvertGit(ctx context.Context, args []string, w io.Writer, verbose bool, color bool) int {
+	tw := NewColorWriter(w, color)
+	if color {
+		tw.EnableTTYBuildLastLine()
+	}
+	spinner := newStatusSpinner()
+
+	cmd := exec.CommandContext(ctx, "git", args...)
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		tw.BailOut(fmt.Sprintf("failed to create stdout pipe: %v", err))
+		return 1
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		tw.BailOut(fmt.Sprintf("failed to create stderr pipe: %v", err))
+		return 1
+	}
+
+	if err := cmd.Start(); err != nil {
+		tw.BailOut(fmt.Sprintf("failed to start git: %v", err))
+		return 1
+	}
+
+	var mu sync.Mutex
+	var lastContent string
+	stopTicker := startStatusTicker(tw, spinner, &mu, &lastContent)
+
+	var lines []string
+	var linesMu sync.Mutex
+
+	onLine := func(line string) {
+		linesMu.Lock()
+		lines = append(lines, line)
+		linesMu.Unlock()
+		mu.Lock()
+		lastContent = line
+		spinner.Touch()
+		tw.UpdateLastLine(spinner.prefix() + line)
+		mu.Unlock()
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		scanner := bufio.NewScanner(stdout)
+		for scanner.Scan() {
+			onLine(scanner.Text())
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		scanner := bufio.NewScanner(stderr)
+		for scanner.Scan() {
+			onLine(scanner.Text())
+		}
+	}()
+	wg.Wait()
+
+	cmdErr := cmd.Wait()
+	stopTicker()
+	tw.FinishLastLine()
+
+	exitCode := 0
+	if cmdErr != nil {
+		if exitErr, ok := cmdErr.(*exec.ExitError); ok {
+			if status, ok := exitErr.Sys().(syscall.WaitStatus); ok {
+				exitCode = status.ExitStatus()
+			} else {
+				exitCode = 1
+			}
+		} else {
+			exitCode = 1
+		}
+	}
+
+	parser := parserForSubcommand(args)
+	if parser != nil {
+		emitGitPhases(tw, parser, lines, exitCode)
+	} else {
+		emitGitGeneric(tw, args, lines, exitCode)
+	}
+
+	tw.Plan()
+	return exitCode
+}
+
+// emitGitPhases feeds lines through a phase parser and emits one test point
+// per non-empty phase. On non-zero exit, emits a single not ok instead.
+func emitGitPhases(tw *Writer, parser *GitPhaseParser, lines []string, exitCode int) {
+	if exitCode != 0 {
+		desc := "git " + parser.phaseOrder[0]
+		combined := strings.Join(lines, "\n")
+		diag := map[string]string{
+			"exit-code": fmt.Sprintf("%d", exitCode),
+		}
+		if combined != "" {
+			diag["output"] = combined
+		}
+		tw.NotOk(desc, diag)
+		return
+	}
+
+	for _, line := range lines {
+		parser.Feed(line)
+	}
+
+	for _, phase := range parser.Phases() {
+		tw.Ok(phase.Name)
+	}
+}
+
+// emitGitGeneric emits a single test point for an unrecognized git command.
+func emitGitGeneric(tw *Writer, args []string, lines []string, exitCode int) {
+	desc := "git " + strings.Join(args, " ")
+	if exitCode == 0 {
+		tw.Ok(desc)
+	} else {
+		combined := strings.Join(lines, "\n")
+		diag := map[string]string{
+			"exit-code": fmt.Sprintf("%d", exitCode),
+		}
+		if combined != "" {
+			diag["output"] = combined
+		}
+		tw.NotOk(desc, diag)
+	}
 }
 
 func classifyPullLine(line string) string {

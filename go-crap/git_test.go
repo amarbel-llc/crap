@@ -1,6 +1,9 @@
 package crap
 
 import (
+	"bytes"
+	"context"
+	"strings"
 	"testing"
 )
 
@@ -123,5 +126,172 @@ func TestGitPhaseParserSkipsEmptyPhases(t *testing.T) {
 
 	if phases[0].Name != "merge" {
 		t.Errorf("phase name = %q, want %q", phases[0].Name, "merge")
+	}
+}
+
+func TestEmitGitPhasesSuccess(t *testing.T) {
+	var buf bytes.Buffer
+	tw := NewColorWriter(&buf, false)
+	tw.EnableTTYBuildLastLine()
+
+	lines := []string{
+		"remote: Enumerating objects: 5, done.",
+		"remote: Counting objects: 100% (5/5), done.",
+		"Unpacking objects: 100% (3/3), done.",
+		"Updating abc1234..def5678",
+		"Fast-forward",
+		" file.go | 3 +++",
+		" 1 file changed, 3 insertions(+)",
+	}
+
+	emitGitPhases(tw, NewGitPullParser(), lines, 0)
+	tw.Plan()
+
+	out := stripANSIAndControl(buf.String())
+	if !strings.Contains(out, "ok 1 - fetch") {
+		t.Errorf("expected fetch test point, got:\n%s", out)
+	}
+	if !strings.Contains(out, "ok 2 - unpack") {
+		t.Errorf("expected unpack test point, got:\n%s", out)
+	}
+	if !strings.Contains(out, "ok 3 - merge") {
+		t.Errorf("expected merge test point, got:\n%s", out)
+	}
+	if !strings.Contains(out, "ok 4 - summary") {
+		t.Errorf("expected summary test point, got:\n%s", out)
+	}
+	if !strings.Contains(out, "1..4") {
+		t.Errorf("expected plan 1..4, got:\n%s", out)
+	}
+}
+
+func TestEmitGitPhasesAlreadyUpToDate(t *testing.T) {
+	var buf bytes.Buffer
+	tw := NewColorWriter(&buf, false)
+	tw.EnableTTYBuildLastLine()
+
+	emitGitPhases(tw, NewGitPullParser(), []string{"Already up to date."}, 0)
+	tw.Plan()
+
+	out := stripANSIAndControl(buf.String())
+	if !strings.Contains(out, "ok 1 - merge") {
+		t.Errorf("expected merge test point, got:\n%s", out)
+	}
+	if !strings.Contains(out, "1..1") {
+		t.Errorf("expected plan 1..1, got:\n%s", out)
+	}
+}
+
+func TestEmitGitPhasesFailure(t *testing.T) {
+	var buf bytes.Buffer
+	tw := NewColorWriter(&buf, false)
+	tw.EnableTTYBuildLastLine()
+
+	emitGitPhases(tw, NewGitPullParser(), []string{"fatal: not a git repository"}, 128)
+	tw.Plan()
+
+	out := stripANSIAndControl(buf.String())
+	if !strings.Contains(out, "not ok 1 - git fetch") {
+		t.Errorf("expected not ok for failed pull, got:\n%s", out)
+	}
+}
+
+func TestEmitGitPushPhases(t *testing.T) {
+	var buf bytes.Buffer
+	tw := NewColorWriter(&buf, false)
+	tw.EnableTTYBuildLastLine()
+
+	lines := []string{
+		"Enumerating objects: 5, done.",
+		"Counting objects: 100% (5/5), done.",
+		"Delta compression using up to 10 threads",
+		"Compressing objects: 100% (3/3), done.",
+		"Writing objects: 100% (3/3), 1.23 KiB | 1.23 MiB/s, done.",
+		"Total 3 (delta 2), reused 0 (delta 0), pack-reused 0",
+		"To github.com:org/repo.git",
+		"   abc1234..def5678  main -> main",
+	}
+
+	emitGitPhases(tw, NewGitPushParser(), lines, 0)
+	tw.Plan()
+
+	out := stripANSIAndControl(buf.String())
+	if !strings.Contains(out, "ok 1 - pack") {
+		t.Errorf("expected pack test point, got:\n%s", out)
+	}
+	if !strings.Contains(out, "ok 2 - transfer") {
+		t.Errorf("expected transfer test point, got:\n%s", out)
+	}
+	if !strings.Contains(out, "ok 3 - summary") {
+		t.Errorf("expected summary test point, got:\n%s", out)
+	}
+}
+
+func TestEmitGitGenericSuccess(t *testing.T) {
+	var buf bytes.Buffer
+	tw := NewColorWriter(&buf, false)
+
+	emitGitGeneric(tw, []string{"version"}, []string{"git version 2.40.0"}, 0)
+	tw.Plan()
+
+	out := buf.String()
+	if !strings.Contains(out, "ok 1 - git version") {
+		t.Errorf("expected ok test point, got:\n%s", out)
+	}
+}
+
+func TestEmitGitGenericFailure(t *testing.T) {
+	var buf bytes.Buffer
+	tw := NewColorWriter(&buf, false)
+
+	emitGitGeneric(tw, []string{"checkout", "nonexistent"}, []string{"error: pathspec 'nonexistent' did not match"}, 1)
+	tw.Plan()
+
+	out := buf.String()
+	if !strings.Contains(out, "not ok 1 - git checkout nonexistent") {
+		t.Errorf("expected not ok test point, got:\n%s", out)
+	}
+	if !strings.Contains(out, "exit-code: 1") {
+		t.Errorf("expected exit-code diagnostic, got:\n%s", out)
+	}
+}
+
+func TestConvertGitGenericSuccess(t *testing.T) {
+	var buf bytes.Buffer
+	exitCode := ConvertGit(
+		context.Background(), []string{"version"},
+		&buf, false, false,
+	)
+
+	if exitCode != 0 {
+		t.Errorf("expected exit code 0, got %d", exitCode)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "CRAP version 2") {
+		t.Errorf("expected CRAP version header, got:\n%s", out)
+	}
+	if !strings.Contains(out, "ok 1 - git version") {
+		t.Errorf("expected ok test point, got:\n%s", out)
+	}
+	if !strings.Contains(out, "1..1") {
+		t.Errorf("expected plan 1..1, got:\n%s", out)
+	}
+}
+
+func TestConvertGitGenericFailure(t *testing.T) {
+	var buf bytes.Buffer
+	exitCode := ConvertGit(
+		context.Background(), []string{"clone", "--bad-flag-that-does-not-exist"},
+		&buf, false, false,
+	)
+
+	if exitCode == 0 {
+		t.Error("expected non-zero exit code")
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "not ok 1") {
+		t.Errorf("expected not ok test point, got:\n%s", out)
 	}
 }

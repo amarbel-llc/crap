@@ -23,11 +23,6 @@
       inputs.nixpkgs-master.follows = "nixpkgs-master";
       inputs.utils.follows = "utils";
     };
-    just-us = {
-      url = "github:amarbel-llc/just-us";
-      inputs.nixpkgs.follows = "nixpkgs";
-      inputs.nixpkgs-master.follows = "nixpkgs-master";
-    };
     bob = {
       url = "github:amarbel-llc/bob";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -45,7 +40,6 @@
       go,
       rust,
       shell,
-      just-us,
       bob,
     }:
     utils.lib.eachDefaultSystem (
@@ -125,7 +119,7 @@
           ];
 
           packages = [
-            just-us.packages.${system}.default
+            pkgs.just
             bob.packages.${system}.batman
           ];
         };

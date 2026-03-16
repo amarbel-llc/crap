@@ -60,8 +60,7 @@ rewriting.
 ## Nix Flake
 
 Uses the standard stable-first nixpkgs convention (see parent `eng` CLAUDE.md).
-DevShell combines Go, Rust, and shell devenvs. Uses `just-us` (a fork of `just`
-with TAP output-format support) — the justfile sets `output-format := "tap"`.
+DevShell combines Go, Rust, and shell devenvs.
 
 ## Key Conventions
 

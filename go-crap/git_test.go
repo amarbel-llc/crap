@@ -369,3 +369,28 @@ func TestConvertGitGenericFailure(t *testing.T) {
 		t.Errorf("expected not ok test point, got:\n%s", out)
 	}
 }
+
+func TestGitClonePhases(t *testing.T) {
+	parser := NewGitCloneParser()
+
+	tests := []struct {
+		line  string
+		phase string
+	}{
+		{"Cloning into 'repo'...", "init"},
+		{"remote: Enumerating objects: 100, done.", "receive"},
+		{"remote: Counting objects: 100% (100/100), done.", "receive"},
+		{"remote: Compressing objects: 100% (80/80), done.", "receive"},
+		{"remote: Total 100 (delta 20), reused 80 (delta 10)", "receive"},
+		{"Receiving objects: 100% (100/100), 1.23 MiB | 5.00 MiB/s, done.", "receive"},
+		{"Resolving deltas: 100% (20/20), done.", "resolve"},
+		{"Updating files: 100% (50/50), done.", "checkout"},
+	}
+
+	for _, tt := range tests {
+		got := parser.Classify(tt.line)
+		if got != tt.phase {
+			t.Errorf("Classify(%q) = %q, want %q", tt.line, got, tt.phase)
+		}
+	}
+}

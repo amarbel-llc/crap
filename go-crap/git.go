@@ -49,6 +49,16 @@ func NewGitPushParser() *GitPhaseParser {
 	}
 }
 
+// NewGitCloneParser returns a parser for git clone output phases:
+// init, receive, resolve, checkout.
+func NewGitCloneParser() *GitPhaseParser {
+	return &GitPhaseParser{
+		phaseOrder: []string{"init", "receive", "resolve", "checkout"},
+		classify:   classifyCloneLine,
+		phases:     make(map[string]*GitPhase),
+	}
+}
+
 // Classify returns the phase name for a line without accumulating it.
 func (p *GitPhaseParser) Classify(line string) string {
 	return p.classify(line)
@@ -334,6 +344,30 @@ func classifyPushLine(line string) string {
 		strings.Contains(trimmed, "[new branch]") ||
 		strings.Contains(trimmed, "[new tag]") {
 		return "summary"
+	}
+
+	return ""
+}
+
+func classifyCloneLine(line string) string {
+	trimmed := strings.TrimSpace(line)
+
+	if strings.HasPrefix(trimmed, "Cloning into ") {
+		return "init"
+	}
+
+	if strings.HasPrefix(trimmed, "remote: ") ||
+		strings.HasPrefix(trimmed, "Receiving objects:") {
+		return "receive"
+	}
+
+	if strings.HasPrefix(trimmed, "Resolving deltas:") {
+		return "resolve"
+	}
+
+	if strings.HasPrefix(trimmed, "Updating files:") ||
+		strings.HasPrefix(trimmed, "Checking out files:") {
+		return "checkout"
 	}
 
 	return ""

@@ -56,9 +56,14 @@
           pname = "large-colon";
           version = "0.1.0";
           src = ./go-crap;
+          subPackages = [ "cmd/large-colon" ];
           vendorHash = "sha256-5Pb0w+3v+R9ciPQ4H0HyFZlIJPOGjFFURDwLl2JvLjs=";
 
           nativeCheckInputs = [ pkgs.git ];
+
+          postInstall = ''
+            ln -s $out/bin/large-colon "$out/bin/::"
+          '';
 
           meta = {
             description = "CRAP-2 validator and writer toolkit";

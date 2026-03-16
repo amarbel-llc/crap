@@ -23,7 +23,7 @@ want a live-updating status line must either:
    stream.
 2. Emit multiple comment lines that scroll the terminal, cluttering
    the output with stale status.
-3. Use ad-hoc ANSI sequences inline, confusing harnesses that do not
+3. Use ad-hoc ANSI sequences inline, confusing readers that do not
    expect cursor movement in CRAP output.
 
 This amendment provides a standard mechanism for a single trailing
@@ -63,7 +63,7 @@ SGR color codes). This line:
 5. MUST NOT span more than one line.
 
 The content after the `# ` prefix is display-only and MUST be ignored
-by harnesses, consistent with CRAP-2's treatment of comment lines.
+by readers, consistent with CRAP-2's treatment of comment lines.
 
 ### Producer Requirements
 
@@ -80,16 +80,16 @@ When the CRAP stream is complete, the producer SHOULD emit a final
 newline after the last update to the trailing line, ensuring the
 terminal prompt appears on a clean line.
 
-### Harness Behavior
+### Reader Behavior
 
-Harnesses MUST treat the trailing line as an ordinary comment — its
+Readers MUST treat the trailing line as an ordinary comment — its
 content after `# ` is ignored like any other comment line.
 
-Harnesses that consume CRAP from a pipe or file will never see ANSI
+Readers that consume CRAP from a pipe or file will never see ANSI
 cursor control sequences (since producers MUST NOT emit the pragma in
 non-TTY contexts), so no special handling is required.
 
-Harnesses that consume CRAP directly from a TTY MAY strip ANSI
+Readers that consume CRAP directly from a TTY MAY strip ANSI
 sequences from the trailing line before processing. Since the line is
 a comment, this is purely cosmetic.
 
@@ -124,7 +124,7 @@ not ok 3 - integration tests
 ```
 
 The trailing `# ...` line is updated in place on the terminal. A
-harness sees it as a comment and ignores its content.
+reader sees it as a comment and ignores its content.
 
 ### Interaction with Streamed Output
 
@@ -153,14 +153,14 @@ last row.
 ### Backwards Compatibility
 
 The trailing line is a valid CRAP comment and will be treated as such
-by any CRAP-2 harness. In non-TTY contexts, producers should disable
+by any CRAP-2 reader. In non-TTY contexts, producers should disable
 the feature with `pragma -status-line`, so piped or file-based consumers
 are unaffected.
 
 ## Security Considerations
 
 The trailing line MAY contain ANSI cursor control sequences beyond SGR
-(e.g., `\r`, `ESC [2K`). Harnesses that process TTY output directly
+(e.g., `\r`, `ESC [2K`). Readers that process TTY output directly
 SHOULD sanitize or strip CSI sequences to prevent terminal injection
 attacks, consistent with the guidance in the ANSI Display Hints
 amendment.

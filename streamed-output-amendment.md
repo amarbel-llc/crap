@@ -10,21 +10,21 @@ title: "CRAP-2 Amendment: Streamed Output"
 ## Problem
 
 CRAP-2 captures process output in YAML diagnostic blocks, which are
-emitted after a test point completes. Harnesses traditionally buffer
+emitted after a test point completes. Readers traditionally buffer
 the entire YAML block — waiting for the closing `...` marker — before
 displaying any content. For long-running tests, build steps, or
 interactive CI environments, this means output is invisible until the
 test finishes.
 
 Common workarounds include sending output to stderr (losing association
-with test points) or emitting ad-hoc `#` comment lines (which harnesses
+with test points) or emitting ad-hoc `#` comment lines (which readers
 treat as unstructured noise). Neither approach preserves the structured
 association between output and test points that YAML diagnostics
 provide.
 
 ## Solution
 
-Define a new pragma, `streamed-output`, that tells harnesses to display
+Define a new pragma, `streamed-output`, that tells readers to display
 lines of a YAML diagnostic block's `output` field incrementally as they
 are written, rather than buffering the entire block until the closing
 `...` marker.
@@ -59,19 +59,19 @@ opens the block, the `...` marker closes it, and all content between
 them is valid YAML 1.2. The pragma changes only the expected delivery
 timing, not the format.
 
-### Harness Behavior
+### Reader Behavior
 
-When `streamed-output` is active (the default), harnesses _should_ display each line
+When `streamed-output` is active (the default), readers _should_ display each line
 of the `output` field as it arrives rather than waiting for the `...`
 marker. This enables real-time observation of test output in terminal
 and CI environments.
 
-Harnesses _must_ still parse the complete YAML block for diagnostic
+Readers _must_ still parse the complete YAML block for diagnostic
 data after the `...` marker is received. Incremental display is a
-presentation concern and does not affect how harnesses interpret the
+presentation concern and does not affect how readers interpret the
 diagnostic data.
 
-Harnesses that do not support incremental display _may_ continue to
+Readers that do not support incremental display _may_ continue to
 buffer the entire block. The resulting output is identical — only the
 timing of display differs.
 
@@ -101,15 +101,15 @@ not ok 2 - test
   ...
 ```
 
-Without the pragma, a harness would display nothing until `...` closes
-each block. With the pragma active, a harness displays each line of the
+Without the pragma, a reader would display nothing until `...` closes
+each block. With the pragma active, a reader displays each line of the
 `output` value as the producer writes it — `compiling main.rs` appears
 immediately, `compiling lib.rs` follows as it happens, and so on.
 
 ### Non-Output Fields
 
 The incremental delivery guarantee applies only to fields representing
-captured process output (`output`, `stderr`, and similar). Harnesses
+captured process output (`output`, `stderr`, and similar). Readers
 _should not_ attempt to incrementally display structured diagnostic
 fields such as `message`, `severity`, `exitcode`, `file`, or `line`,
 which are typically short values written atomically.
@@ -118,8 +118,8 @@ which are typically short values written atomically.
 
 The YAML diagnostic block is structurally identical whether streamed
 output is active or disabled — it is valid CRAP-2 in both cases. The
-only difference is whether the harness displays output lines as they
-arrive or after the block closes. Harnesses that do not support
+only difference is whether the reader displays output lines as they
+arrive or after the block closes. Readers that do not support
 incremental display will naturally buffer the block with no ill effect.
 
 ### Subtests
@@ -138,7 +138,7 @@ independently.
 When both `streamed-output` and the ANSI in YAML Output Blocks
 amendment are in effect, incrementally delivered `output` lines _may_
 contain ANSI SGR sequences, subject to the same rules defined by that
-amendment (SGR only, TTY-gated, `NO_COLOR` respected). Harnesses that
+amendment (SGR only, TTY-gated, `NO_COLOR` respected). Readers that
 display output lines incrementally _should_ pass through SGR sequences
 when writing to a terminal and strip them when writing to a
 non-terminal, exactly as they would for a fully buffered YAML block.
@@ -147,7 +147,7 @@ non-terminal, exactly as they would for a fully buffered YAML block.
 
 Future amendments _may_ define conventions for distinguishing output
 streams (e.g., separate `stdout` and `stderr` fields) or for signaling
-progress metadata within the output. Harnesses _should not_ assume any
+progress metadata within the output. Readers _should not_ assume any
 semantics beyond what is defined here.
 
 ## Authors

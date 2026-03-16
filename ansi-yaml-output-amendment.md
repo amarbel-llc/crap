@@ -12,7 +12,7 @@ title: "CRAP-2 Amendment: ANSI in YAML Output Blocks"
 This amendment defines how CRAP-2 producers MAY embed ANSI escape
 sequences in YAML diagnostic block values when standard output is a
 terminal (TTY). It specifies which YAML fields are permitted to contain
-ANSI sequences, how harnesses SHOULD handle them, and how the CRAP
+ANSI sequences, how readers SHOULD handle them, and how the CRAP
 stream remains valid and parseable regardless of whether a consumer
 supports color.
 
@@ -104,22 +104,22 @@ valid YAML 1.2. In practice, this means:
 - Single-quoted strings MUST NOT contain ANSI sequences, as YAML
   single-quoted scalars do not support escape sequences.
 
-### Harness Behavior
+### Reader Behavior
 
-Harnesses MUST be able to parse YAML diagnostic blocks that contain
+Readers MUST be able to parse YAML diagnostic blocks that contain
 ANSI SGR sequences. Since ANSI escape characters are valid YAML
 content, compliant YAML 1.2 parsers will handle them without
 modification.
 
-Harnesses that compare YAML diagnostic values programmatically (e.g.,
+Readers that compare YAML diagnostic values programmatically (e.g.,
 comparing `found` against `wanted`) SHOULD strip ANSI SGR sequences
 before comparison.
 
-Harnesses that display YAML diagnostic content to a terminal MAY pass
-through ANSI sequences in their output. Harnesses that display to a
+Readers that display YAML diagnostic content to a terminal MAY pass
+through ANSI sequences in their output. Readers that display to a
 non-terminal SHOULD strip ANSI sequences before output.
 
-Harnesses that strip ANSI sequences SHOULD strip all `ESC [` CSI
+Readers that strip ANSI sequences SHOULD strip all `ESC [` CSI
 sequences, not just SGR, to prevent injection of terminal control
 codes.
 
@@ -165,7 +165,7 @@ not ok 1 - output matches expected
   ...
 ```
 
-After ANSI stripping by a harness writing to a log file, this is
+After ANSI stripping by a reader writing to a log file, this is
 equivalent to:
 
 ```crap-2
@@ -196,18 +196,18 @@ are all possible with broader escape codes. This amendment restricts
 producers to SGR sequences only.
 
 YAML diagnostic values may contain arbitrary text captured from child
-processes. Harnesses that display YAML content to a terminal SHOULD
+processes. Readers that display YAML content to a terminal SHOULD
 strip all `ESC [` CSI sequences, not just SGR, to prevent injection
 of terminal control codes through captured output.
 
 ## Backwards Compatibility
 
 YAML 1.2 parsers handle `0x1B` bytes in string values without issue,
-so existing harnesses will parse YAML blocks containing ANSI
+so existing readers will parse YAML blocks containing ANSI
 sequences correctly. The ANSI characters will appear as part of the
 string value.
 
-Harnesses that do not implement ANSI stripping will display raw
+Readers that do not implement ANSI stripping will display raw
 escape sequences when writing YAML values to a non-terminal. This is
 cosmetically unpleasant but not a correctness issue — the YAML data
 remains structurally intact and all values are preserved.

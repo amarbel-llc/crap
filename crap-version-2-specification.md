@@ -33,7 +33,7 @@ document are to be interpreted as described in [RFC
 
 CRAP-2 is a fork of TAP14, which is largely backwards compatible with
 TAP13.  That is, CRAP-2 is designed to be reasonably parseable by any
-compliant TAP13 Harness, and CRAP-2 Harnesses should be able to
+compliant TAP13 Reader, and CRAP-2 Readers should be able to
 reasonably interpret the output of TAP13 Producers.
 
 The following changes have been made to the specification, which
@@ -110,25 +110,26 @@ not ok 4 - Summarized correctly # TODO Not written yet
   ...
 ```
 
-## Harness Behavior
+## Reader Behavior
 
-In this document, the "harness" is any program analyzing CRAP output.
+In this document, the "reader" is any program that consumes CRAP output.
 
 Typically this will be a test framework's runner program, but may also be a
-programmatic parser, parent test object, or test result reporter.
+programmatic parser, parent test object, terminal renderer, or test result
+reporter.
 
-In a typical CRAP implementation, tests are programs that ouput CRAP data
-according to this specification.  The "test harness" reads CRAP output from
-these programs, and handles it in some way.
+In a typical CRAP implementation, tests are programs that output CRAP data
+according to this specification.  The reader consumes CRAP output from
+these programs and handles it in some way.
 
-A harness that is collecting output from a test program _should_ read and
+A reader that is collecting output from a test program _should_ read and
 interpret CRAP from the process's standard output, not standard error.
 (Handling of test standard error is implementation-specific.)
 
-A Harness _should_ normalize line endings by replacing any instances of
+A Reader _should_ normalize line endings by replacing any instances of
 `\r\n` or `\r` in the CRAP document with `\n`.
 
-A harness _should_ treat a test program as a failed test if:
+A reader _should_ treat a test program as a failed test if:
 
 * The CRAP output lines indicate test failure, or
 * The CRAP output of the process is invalid in a way that is not
@@ -136,22 +137,22 @@ A harness _should_ treat a test program as a failed test if:
 * The exit code of the test program is not 0 (including test programs
   killed by a fatal Unix signal).
 
-If one or more test programs are considered failures, then a CRAP Harness
+If one or more test programs are considered failures, then a CRAP Reader
 _should_ indicate failure to the user in whatever means are appropriate.
 For example, a command-line test runner might exit with a non-zero status
 code, while a web-based continuous integration system might put a red
 "FAILED" notice in the html output.
 
-Note that some of the above guidance may not apply if the Harness is
+Note that some of the above guidance may not apply if the Reader is
 interpreting CRAP from a different sort of text stream, or for a purpose
-other than actually running tests.  For example, a Harness may be used to
+other than actually running tests.  For example, a Reader may be used to
 analyze the recorded output of past test runs and provide data about them.
 
 ## Document Structure
 
 CRAP-2 producers _must_ encode CRAP data using the UTF-8 encoding.
 
-Harnesses _should_ interpret all CRAP streams using UTF-8.  Harnesses _may_
+Readers _should_ interpret all CRAP streams using UTF-8.  Readers _may_
 provide a mechanism for using other encodings explicitly, if needed for
 backwards compatibility.
 
@@ -163,7 +164,7 @@ To indicate that this is CRAP-2 the first line _must_ be
 CRAP-2
 ```
 
-Harnesses _may_ interpret ostensibly
+Readers _may_ interpret ostensibly
 [TAP13](https://testanything.org/tap-version-13-specification.html) streams
 as CRAP-2, as this specification is compatible with observed behavior of
 existing TAP13 consumers and producers.  That is, they _may_ treat this as
@@ -173,7 +174,7 @@ a valid Version line while parsing CRAP-2:
 TAP version 13
 ```
 
-Harnesses _may_ treat any CRAP stream lacking a version as a failed test.
+Readers _may_ treat any CRAP stream lacking a version as a failed test.
 
 ### Plan
 
@@ -184,7 +185,7 @@ The Plan _must_ appear exactly once in the file, either before any Test
 Point lines, or after all Test Point lines.  That is, if it appears after
 any Test Point lines, there _must not_ be any Test Point lines following.
 
-A Harness _must_ treat a CRAP stream lacking a plan as a failed test.
+A Reader _must_ treat a CRAP stream lacking a plan as a failed test.
 
 The Plan specifies how many test points are to follow. For example,
 
@@ -209,7 +210,7 @@ Plan := "1::" Number ("" | "# " Reason)
 
 A plan line of `1::0` indicates that the test set was completely skipped;
 no tests are expected to follow, and none should have come before.
-Harnesses _should_ report on `1::0` test runs similarly to their handling
+Readers _should_ report on `1::0` test runs similarly to their handling
 of `SKIP` Test Points, treating any comment in the Plan as the reason for
 skipping.
 
@@ -222,7 +223,7 @@ example, `5..8` to indicate that test points with IDs between 5 and 8 would
 be run.  However, this is not widely supported.
 
 Thus, CRAP-2 producers _must_ output a Plan starting with `1`.  CRAP-2
-Harnesses _may_ allow plans starting with numbers other than 1, but if so,
+Readers _may_ allow plans starting with numbers other than 1, but if so,
 they _must_ treat any Test Point IDs outside the plan range as a test
 failure.
 
@@ -255,7 +256,7 @@ case-sensitive.
 #### Test Point ID
 
 CRAP expects the ok or not ok to be followed by an integer Test Point
-ID. If there is no number, the harness _must_ maintain its own counter
+ID. If there is no number, the reader _must_ maintain its own counter
 until the script supplies test numbers again.
 
 For example, the following test output is acceptable:
@@ -325,7 +326,7 @@ ok 4
 ok 1
 ```
 
-Test Point IDs _should_ be unique within the CRAP Document.  Harnesses _may_
+Test Point IDs _should_ be unique within the CRAP Document.  Readers _may_
 warn about repeated Test Point IDs or treat them as a test failure, but
 _must not_ treat a Test Point with a re-used ID as a non-CRAP line.
 
@@ -340,18 +341,18 @@ ok 42 - this is the description of the test
 
 Descriptions _should_ be separated from the Test Point Status and Test
 Point ID by the string `" - "`, in order to prevent confusing a numeric
-description with a Test Point ID.  Harnesses _must_ treat Test Points
+description with a Test Point ID.  Readers _must_ treat Test Points
 identically whether the description starts with `" - "` or not.
 
 For example, these two test points _must_ be treated identically by a
-Harness:
+Reader:
 
 ```crap-2
 ok 1 this is fine
 ok 1 - this is fine
 ```
 
-Harnesses _should not_ consider a leading `" - "` to be a part of the
+Readers _should not_ consider a leading `" - "` to be a part of the
 description reported to a user.
 
 #### Directive
@@ -360,15 +361,15 @@ Directives are special notes that follow the first unescaped `#` on the
 Test Point line that is preceded and followed by whitespace.  Three are
 currently defined: `TODO`, `SKIP`, and `WARN`.
 
-Directives are not case sensitive.  That is, Harnesses _must_ treat `#
+Directives are not case sensitive.  That is, Readers _must_ treat `#
 SKIP`, `# skip`, and `# SkIp` identically.
 
-Harnesses _may_ support additional platform-specific Directives.  Future
+Readers _may_ support additional platform-specific Directives.  Future
 versions of this specification may codify additional Directives with
 defined semantics.
 
 Unrecognized Directives _must not_ be treated as test failure, or an
-invalid CRAP line.  Harnesses _should_ include any unrecognized directives
+invalid CRAP line.  Readers _should_ include any unrecognized directives
 in the Test Point description.
 
 Note that escaped `#` characters are not to be treated as delimiters for
@@ -378,20 +379,20 @@ Directives.  See "Escaping" below.
 
 Earlier versions of the CRAP specification were not explicit about
 whitespace requirements regarding directives.  The following rules maximize
-compatibility between CRAP-2 producers and harnesses:
+compatibility between CRAP-2 producers and readers:
 
 1. Producers _must_ output directives with at least one space character
    preceding the `#` in a directive, as well as at least one space
    character between the `#` and the directive name.
 
-2. Harnesses _must not_ treat escaped `#` characters as directive
+2. Readers _must not_ treat escaped `#` characters as directive
    delimiters.
 
-3. Harnesses _may_ accept directive delimiters where the `#` is not
+3. Readers _may_ accept directive delimiters where the `#` is not
    preceded by whitespace, but _should_ warn that such output is
    non-conformant with the CRAP-2 specification.
 
-If harnesses choose to parse directives without whitespace before and after
+If readers choose to parse directives without whitespace before and after
 the `#`, then they ought to consider the impact if test descriptions
 contain URLs and/or may be coming from CRAP producers that are not diligent
 about escaping `#` characters.  This should be done only to the extent
@@ -416,7 +417,7 @@ ok 5 - may skip, but should warn#skip
 
 ##### Backwards Compatibility and Parsing Notes
 
-For backwards compatibility with earlier incarnations of CRAP, Harnesses
+For backwards compatibility with earlier incarnations of CRAP, Readers
 _must_ accept additional non-whitespace characters following the
 literal strings `"SKIP"` or `"TODO"`.  Everything after `(TODO|SKIP|WARN)\S*\s+`
 is the reason.  For example, this is supported, and shows a test with 2
@@ -434,7 +435,7 @@ ok 1 - do it later # Skipped
 ok 2 - works on windows # Skipped: only run on windows
 ```
 
-For broad compatibility with as many harnesses as possible, as well as
+For broad compatibility with as many readers as possible, as well as
 future-proofing their output, Producers _should_ always report `SKIP` and
 `TODO` tests using only the directive names ("SKIP" or "TODO"), optionally
 followed by a space and a reason.  Future versions of this specification
@@ -482,11 +483,11 @@ These tests represent a feature to be implemented or a bug to be fixed and
 act as something of an executable "things to do" list. They are not
 expected to succeed.
 
-Should a todo test point begin succeeding, the harness _may_ report it in
+Should a todo test point begin succeeding, the reader _may_ report it in
 some way that indicates that whatever was supposed to be done has been, and
 it should be promoted to a normal Test Point.
 
-Harnesses _must not_ treat failing `TODO` test points as a test failure.
+Readers _must not_ treat failing `TODO` test points as a test failure.
 
 Harneses _should_ report `TODO` test points found as a list of items
 needing work, if that is appropriate for their use case.
@@ -504,9 +505,9 @@ If the SKIP has an explanation, it must be separated from SKIP by a space.
 These tests indicate that a test was not run, or if it was, that its
 success or failure is being temporarily ignored.
 
-Harnesses _must not_ treat failing `SKIP` test points as a test failure.
+Readers _must not_ treat failing `SKIP` test points as a test failure.
 
-Harnesses _should_ report `SKIP` test points found as a list of items that
+Readers _should_ report `SKIP` test points found as a list of items that
 were not tested, if that is appropriate for their use case.
 
 ##### `WARN` tests
@@ -525,12 +526,12 @@ not alter the pass/fail semantics of the test point — a `not ok` test
 with `# WARN` is still a failure, and an `ok` test with `# WARN` is still
 a success.
 
-Harnesses _must not_ change the pass/fail status of a test point based on
+Readers _must not_ change the pass/fail status of a test point based on
 the presence of a `WARN` directive.
 
-Harnesses _should_ report `WARN` test points prominently, for example as
+Readers _should_ report `WARN` test points prominently, for example as
 a separate list of warnings in the test summary. When outputting to a
-terminal, harnesses _should_ display the `# WARN` directive using ANSI
+terminal, readers _should_ display the `# WARN` directive using ANSI
 SGR yellow (SGR 33), consistent with the ANSI Display Hints amendment's
 treatment of `# SKIP` and `# TODO`.
 
@@ -565,7 +566,7 @@ not ok 3 - Resolve address
 ```
 
 Currently (March 2022) the data structure represented by a YAML Diagnostic
-block has not been standardized.  CRAP-2 Harnesses _must_ allow any data
+block has not been standardized.  CRAP-2 Readers _must_ allow any data
 structures supported by their YAML parser implementation.
 
 A future version of this specification _may_ provide guidance regarding
@@ -576,16 +577,16 @@ YAML Diagnostic fields in common usage.
 Lines outside of a YAML diagnostic block which begin with a `#` character
 preceded by zero or more characters of whitespace, are comments.
 
-A Harness _may_ present these to the user, ignore them, or assign meaning
+A Reader _may_ present these to the user, ignore them, or assign meaning
 to certain comments.
 
-A Harness _must not_ treat a test as a failure based on the presence of
-comment lines.  That is, a Harness _must_ ignore any unrecognized comment
+A Reader _must not_ treat a test as a failure based on the presence of
+comment lines.  That is, a Reader _must_ ignore any unrecognized comment
 lines.
 
 ### Pragmas
 
-A Pragma provides information to a Harness to control its behavior or
+A Pragma provides information to a Reader to control its behavior or
 configure it in some way.  Each Pragma line represents a single boolean
 switch which can be set to `true` or `false`.
 
@@ -618,7 +619,7 @@ pragma -status-line
 pragma -streamed-output
 ```
 
-Producers _may_ still emit `pragma +<key>` lines for clarity, but harnesses
+Producers _may_ still emit `pragma +<key>` lines for clarity, but readers
 _must_ treat features as enabled whether or not an explicit `pragma +` line
 is present.
 
@@ -645,10 +646,10 @@ The meaning and availability of keys that may be set by Pragmas are
 implementation-specific, except where defined by the CRAP-2 specification
 and its amendments.
 
-Harnesses _may_ choose to respond to Pragma lines, or ignore them.
+Readers _may_ choose to respond to Pragma lines, or ignore them.
 
-Harnesses _must not_ treat unrecognized Pragma keys as a test failure, even
-if they would normally treat invalid CRAP as a test failure.  Harnesses
+Readers _must not_ treat unrecognized Pragma keys as a test failure, even
+if they would normally treat invalid CRAP as a test failure.  Readers
 _may_ warn if a Pragma is unrecognized, or fail if the named pragma is
 recognized, but cannot be set for some reason.
 
@@ -665,7 +666,7 @@ Blank lines within YAML blocks _must_ be preserved as part of the YAML
 document, because line breaks have semantic meaning in YAML documents.  For
 example, multiline folded scalar values use `\n\n` to denote line breaks.
 
-Blank lines outside of YAML blocks _must_ be ignored by the Harness.
+Blank lines outside of YAML blocks _must_ be ignored by the Reader.
 
 ### Bail out!
 
@@ -678,7 +679,7 @@ Bail out!
 ```
 
 to standard output. Any message after these words _must_ be presented by
-the Harness as the reason why testing must be stopped.  For example:
+the Reader as the reason why testing must be stopped.  For example:
 
 ```crap-2
 Bail out! MySQL is not running.
@@ -700,9 +701,9 @@ The words "Bail out!" are case insensitive.
 Any line that is not a valid version, plan, test point, YAML diagnostic,
 pragma, a blank line, or a bail out is invalid CRAP.
 
-A Harness _may_ silently ignore invalid CRAP lines, pass them through to its
+A Reader _may_ silently ignore invalid CRAP lines, pass them through to its
 own stderr or stdout, or report them in some other fashion.  However,
-Harnesses _should not_ treat invalid CRAP lines as a test failure by
+Readers _should not_ treat invalid CRAP lines as a test failure by
 default.
 
 ## Escaping
@@ -729,7 +730,7 @@ t.pass('hello # \\ world', { todo: 'escape # characters with \\' })
 // ok 1 - hello \# \\ world # TODO escape \# characters with \\
 ```
 
-Harnesses _must_:
+Readers _must_:
 
 1. Treat any `\\` as a literal `\`, but ignore it for the purpose of
    escaping a `#` character.
@@ -745,7 +746,7 @@ including unescaped `#` characters in the Test Point description or `TODO`
 reason.
 
 Note that the specific fields `description`, `todo`, and `todo reason` are
-not normative, and shown for illustration purposes only.  Harnesses
+not normative, and shown for illustration purposes only.  Readers
 _should_ present this data to their consumers in whatever manner is
 appropriate for their language and context.
 
@@ -792,7 +793,7 @@ ok 8 - hello \\\\\\\# todo
 Subtests provide a way to nest one CRAP-2 stream inside another.  This is
 useful in a variety of situations.  For example:
 
-1. A Harness parses a collection of CRAP documents, providing output which
+1. A Reader parses a collection of CRAP documents, providing output which
    is also in CRAP format.
 
     ```crap-2
@@ -851,18 +852,18 @@ useful in a variety of situations.  For example:
     1::2
     ```
 
-Subtests are designed with graceful fallback for TAP13 harnesses in mind.
+Subtests are designed with graceful fallback for TAP13 readers in mind.
 
 Since TAP13 specifies that non-CRAP output _should_ be ignored or provided
 directly to the user, and indented Test Points and Plans are non-CRAP
 according to TAP13, only the terminating correlated test point will be
-interpreted by most TAP13 Harnesses.  Thus, they will usually report the
+interpreted by most TAP13 Readers.  Thus, they will usually report the
 overall subtest result correctly, even if they lack the details about the
 results of the subtest.
 
 Since several TAP13 parsers in popular usage treat a repeated Version
 declaration as an error, even if the Version is indented, Subtests _should
-not_ include a Version, if TAP13 Harness compatibility is desirable.
+not_ include a Version, if TAP13 Reader compatibility is desirable.
 
 ### Bare Subtests
 
@@ -882,7 +883,7 @@ ok 1 - subtest passing
 
 Note that, because the Version is optional in subtests, and the plan may
 occur after all test points, the first item in a subtest may be a further
-subtest.  Harnesses must thus treat any multiple of 4-space indentation is
+subtest.  Readers must thus treat any multiple of 4-space indentation is
 multiple levels of nested subtest:
 
 ```crap-2
@@ -971,20 +972,20 @@ Commented Subtests are encouraged, as they provide the following benefits:
 
 ### Subtest Bailouts
 
-Harnesses _must_ treat a Bailout in a nested Subtest as a bailout for the
+Readers _must_ treat a Bailout in a nested Subtest as a bailout for the
 entire test run.
 
-For backwards compatibility with TAP13 Harnesses, Producers _should_ emit a
+For backwards compatibility with TAP13 Readers, Producers _should_ emit a
 `Bail out!` line at the root indentation level whenever a Subtest bails
 out.
 
 ### Subtest Pragmas
 
 Any Pragmas set in a Subtest affect _only_ the parsing of the Subtest.
-Harnesses _must not_ allow Pragmas set in Subtests to affect the behavior
+Readers _must not_ allow Pragmas set in Subtests to affect the behavior
 of the parser with respect to the parent CRAP Document.
 
-For example, given a Harness where a `strict` Pragma will cause it to treat
+For example, given a Reader where a `strict` Pragma will cause it to treat
 any non-CRAP as an error:
 
 ```crap-2
@@ -1016,30 +1017,30 @@ failure, because the `strict` Pragma setting at the parent level was false.
        spaces (4 + 2).  In a subtest nested within another subtest, YAML
        diagnostics would be indented 10 spaces (4 + 4 + 2).
 3. Subtests _should not_ emit a Version line, if compatibility with TAP13
-   Harnesses is desirable.
+   Readers is desirable.
 4. The subtest is terminated by a single Test Point line in the parent CRAP
    document, which follows the indented CRAP Document.  This is the
    Correlated Test Point, and reflects the pass/fail status of the Subtest.
     1. Producers _must_ communicate the intended status of the subtest
        (pass/fail/todo/skip/etc.) by assigning these semantics to the
        correlated Test Point.
-    2. Harnesses _should_ treat the entire subtest as either a pass or fail
+    2. Readers _should_ treat the entire subtest as either a pass or fail
        based on the status of the correlated Test Point, but _may_ treat
        the subtest as a failure if they would consider the nested subtest
        CRAP Document a test failure.
-5. Harnesses _should_ treat otherwise valid CRAP that is indented anything
+5. Readers _should_ treat otherwise valid CRAP that is indented anything
    other than a multiple of 4 spaces as non-CRAP.
 6. Providers _should not_ emit a Version for the Subtest CRAP Document.
 7. Providers _should_ emit a Subtest Comment if the name of the subtest is
    known at the outset.
-8. If Subtest Comment is provided, Harnesses _should_ continue the subtest
+8. If Subtest Comment is provided, Readers _should_ continue the subtest
    until a matching test point (same name, or no name in either) at parent
    level is found, treating any other un-indented lines as non-CRAP, and
    fail the test if a matching test point is not found.
-9. If Subtest Comment is not provided, Harnesses _must_ treat the next Test
+9. If Subtest Comment is not provided, Readers _must_ treat the next Test
    Point at the parent level as the end of the subtest, and treat any
    intervening lines indented less than the subtest level as non-CRAP.
-10. Harnesses _should_ treat unterminated Subtests as non-CRAP.
+10. Readers _should_ treat unterminated Subtests as non-CRAP.
 11. A Bailout in a subtest CRAP document _must_ abort the entire process,
     exactly as if it had occurred in the top-level CRAP document.
 12. Any lines at the parent indentation level that occur between the
@@ -1065,7 +1066,7 @@ valid TAP-14 stream by:
    comments, subtests, and bail outs are wire-compatible.
 
 Producers _may_ offer a TAP-14 output mode that performs this
-transformation. Harnesses that consume TAP-14 _should_ be able to parse
+transformation. Readers that consume TAP-14 _should_ be able to parse
 CRAP-2 output after this reformatting step.
 
 Similarly, a TAP-14 stream can be reformatted to CRAP-2 by replacing the
@@ -1110,7 +1111,7 @@ a database, it doesn't know exactly how many servers it will need to ping.
 Thus, the test count is declared at the bottom after all the test points
 have run. Also, two of the tests fail. The YAML block following each
 failure gives additional information about the failure that may be
-displayed by the harness.
+displayed by the reader.
 
 ```crap-2
 CRAP-2
@@ -1177,7 +1178,7 @@ CRAP-2
 
 The following example reports that four tests are run and the last two
 tests failed. However, because the failing tests are marked as things to do
-later, they are considered successes. Thus, a harness should report this
+later, they are considered successes. Thus, a reader should report this
 entire listing as a success.
 
 ```crap-2

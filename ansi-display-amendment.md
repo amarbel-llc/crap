@@ -12,13 +12,13 @@ title: "CRAP-2 Amendment: ANSI Display Hints"
 This amendment defines how CRAP-2 producers MAY embed ANSI escape
 sequences in test point status keywords (`ok`, `not ok`, `Bail out!`)
 and directives (`# SKIP`, `# TODO`) to provide colored terminal output.
-It specifies where sequences are permitted, how harnesses SHOULD handle
+It specifies where sequences are permitted, how readers SHOULD handle
 them, and how the CRAP stream remains valid and parseable regardless of
 whether a consumer supports color.
 
 ## Problem
 
-CRAP output is read by both machines (harnesses, CI systems, log
+CRAP output is read by both machines (readers, CI systems, log
 aggregators) and humans (developers watching test runs in a terminal).
 For human readers, a wall of monochrome `ok` and `not ok` lines makes
 failures hard to spot at a glance. Colored output — green for pass, red
@@ -27,7 +27,7 @@ CRAP-2 does not address it.
 
 Producers that want colored output today must either:
 
-1. Emit ANSI codes unconditionally, breaking harnesses that match on
+1. Emit ANSI codes unconditionally, breaking readers that match on
    exact strings like `/^ok/` or `/^not ok/`.
 2. Avoid color entirely, sacrificing readability.
 3. Use a non-standard out-of-band channel (stderr), losing association
@@ -86,24 +86,24 @@ Producers MAY respect the `NO_COLOR` environment variable
 non-empty value, producers SHOULD suppress ANSI sequences regardless of
 TTY detection.
 
-### Harness Behavior
+### Reader Behavior
 
-Harnesses MUST strip ANSI SGR escape sequences (the pattern
+Readers MUST strip ANSI SGR escape sequences (the pattern
 `ESC [ ... m`) from test point lines before parsing. This ensures that
 colored CRAP streams are parsed identically to uncolored streams.
 
-Harnesses that display results to a terminal MAY pass through or
+Readers that display results to a terminal MAY pass through or
 regenerate ANSI sequences in their own output.
 
-Harnesses that do not implement ANSI stripping SHOULD still function
+Readers that do not implement ANSI stripping SHOULD still function
 correctly with uncolored CRAP streams. The presence of ANSI sequences
 in a CRAP stream that is not a TTY indicates a non-conformant producer,
-and harnesses MAY treat such streams as containing non-CRAP characters.
+and readers MAY treat such streams as containing non-CRAP characters.
 
 ### Interaction with Subtests
 
 ANSI sequences in a subtest's test points are indented along with the
-rest of the subtest content. Harnesses MUST strip ANSI sequences before
+rest of the subtest content. Readers MUST strip ANSI sequences before
 checking indentation level.
 
 ### Interaction with Escaping
@@ -130,7 +130,7 @@ CRAP-2
 \033[32mok\033[0m 3 - cleanup \033[33m# SKIP\033[0m not needed
 ```
 
-After ANSI stripping by a harness, this is equivalent to:
+After ANSI stripping by a reader, this is equivalent to:
 
 ```crap-2
 CRAP-2
@@ -149,7 +149,7 @@ ok 3 - cleanup # SKIP not needed
 ANSI escape sequences can encode more than color — cursor movement,
 screen clearing, and terminal title changes are all possible with
 broader escape codes. This amendment restricts producers to SGR
-sequences only (the `ESC [ <params> m` form). Harnesses that strip
+sequences only (the `ESC [ <params> m` form). Readers that strip
 escapes SHOULD strip all `ESC [` CSI sequences, not just SGR, to
 prevent injection of terminal control codes through crafted test
 descriptions or diagnostic output.
@@ -160,9 +160,9 @@ Producers MUST NOT emit non-SGR escape sequences in CRAP output.
 
 ### Backwards Compatibility with CRAP-2
 
-CRAP-2 specifies that harnesses SHOULD NOT treat invalid CRAP lines as
+CRAP-2 specifies that readers SHOULD NOT treat invalid CRAP lines as
 test failure by default, and that non-CRAP characters are silently
-ignored or passed through. A CRAP-2 harness that does not implement
+ignored or passed through. A CRAP-2 reader that does not implement
 ANSI stripping will typically still parse colored output correctly if
 ANSI sequences appear only around the status keywords, because:
 

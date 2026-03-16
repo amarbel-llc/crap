@@ -16,10 +16,10 @@ improve readability of large numbers — `1::10,000` (en-US),
 `1::10.000` (de-DE), `1::10 000` (fr-FR) — but CRAP-2 has no
 mechanism to signal that these formats are in use.
 
-Without an explicit locale declaration, harnesses cannot distinguish
+Without an explicit locale declaration, readers cannot distinguish
 between `1.000` meaning "one thousand" (de-DE grouping) and `1.000`
 meaning a malformed decimal. Producers that emit locale-formatted
-numbers today will break any harness that expects plain integers.
+numbers today will break any reader that expects plain integers.
 
 ## Requirements Language
 
@@ -39,7 +39,7 @@ pragma +locale-formatting:de-DE
 
 The tag after the colon MUST be a valid BCP 47 language tag (e.g.,
 `en-US`, `de-DE`, `fr-FR`, `ja-JP`). The pragma without a tag is
-invalid and harnesses MUST ignore it.
+invalid and readers MUST ignore it.
 
 When active, test point IDs and plan counts MAY use the grouping
 separator convention of the declared locale.
@@ -70,14 +70,14 @@ in these positions regardless of locale.
 
 ### Parsing Rules
 
-Harnesses that recognize this pragma MUST:
+Readers that recognize this pragma MUST:
 
 1. Strip all grouping separators defined by the declared locale from
    test point IDs and plan counts before numeric comparison.
 2. Use the resulting plain integer for all internal bookkeeping (plan
    validation, test point counting, ID uniqueness checks).
 
-Harnesses that do not recognize the pragma will ignore it per
+Readers that do not recognize the pragma will ignore it per
 CRAP-2's pragma rules, and will likely fail to parse the
 locale-formatted numbers. This is expected — see Backwards
 Compatibility below.
@@ -85,7 +85,7 @@ Compatibility below.
 ### Locale Grouping Conventions
 
 The following common grouping conventions are defined for reference.
-Harnesses MAY support additional locales beyond this list.
+Readers MAY support additional locales beyond this list.
 
 | Locale | Grouping Separator | Example (ten thousand) |
 |--------|--------------------|------------------------|
@@ -111,7 +111,7 @@ ok 1,199 - cleanup temporary files
 ok 1,200 - final teardown
 ```
 
-After stripping grouping separators, a harness interprets this as
+After stripping grouping separators, a reader interprets this as
 `1::1200` with test points 1 through 1200.
 
 A German-locale example:
@@ -129,13 +129,13 @@ ok 1.200 - abschließender Abbau
 
 ### Backwards Compatibility
 
-Harnesses that do not recognize the `locale-formatting` pragma MUST
+Readers that do not recognize the `locale-formatting` pragma MUST
 ignore it per CRAP-2's pragma rules. However, they will encounter
 test point IDs and plan counts containing non-digit characters, which
 they will likely treat as non-CRAP or parse incorrectly.
 
 For this reason, producers SHOULD only activate locale formatting
-when they know the consuming harness supports this amendment.
+when they know the consuming reader supports this amendment.
 Producers targeting maximum compatibility SHOULD NOT use this pragma.
 
 ### Interaction with YAML Diagnostics

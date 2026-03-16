@@ -107,7 +107,13 @@
       in
       {
         packages = {
-          default = large-colon;
+          default = pkgs.symlinkJoin {
+            name = "crap";
+            paths = [
+              large-colon
+              crap-git
+            ];
+          };
           inherit large-colon crap-git rust-crap;
         };
 

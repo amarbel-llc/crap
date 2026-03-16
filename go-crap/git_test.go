@@ -234,8 +234,8 @@ func TestEmitGitPhasesSuccess(t *testing.T) {
 	if !strings.Contains(out, "ok 4 - summary") {
 		t.Errorf("expected summary test point, got:\n%s", out)
 	}
-	if !strings.Contains(out, "1..4") {
-		t.Errorf("expected plan 1..4, got:\n%s", out)
+	if !strings.Contains(out, "1::4") {
+		t.Errorf("expected plan 1::4, got:\n%s", out)
 	}
 }
 
@@ -251,8 +251,8 @@ func TestEmitGitPhasesAlreadyUpToDate(t *testing.T) {
 	if !strings.Contains(out, "ok 1 - merge") {
 		t.Errorf("expected merge test point, got:\n%s", out)
 	}
-	if !strings.Contains(out, "1..1") {
-		t.Errorf("expected plan 1..1, got:\n%s", out)
+	if !strings.Contains(out, "1::1") {
+		t.Errorf("expected plan 1::1, got:\n%s", out)
 	}
 }
 
@@ -342,14 +342,14 @@ func TestConvertGitGenericSuccess(t *testing.T) {
 	}
 
 	out := buf.String()
-	if !strings.Contains(out, "CRAP version 2") {
+	if !strings.Contains(out, "CRAP-2") {
 		t.Errorf("expected CRAP version header, got:\n%s", out)
 	}
 	if !strings.Contains(out, "ok 1 - git version") {
 		t.Errorf("expected ok test point, got:\n%s", out)
 	}
-	if !strings.Contains(out, "1..1") {
-		t.Errorf("expected plan 1..1, got:\n%s", out)
+	if !strings.Contains(out, "1::1") {
+		t.Errorf("expected plan 1::1, got:\n%s", out)
 	}
 }
 

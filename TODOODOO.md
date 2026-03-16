@@ -6,3 +6,4 @@
 - [ ] use `1::4`-style test plan
 - [ ] brainstorm replacements for "test plan", "subtest", "test point", "bail
   out"
+- [ ] rename crap-git to crappy-git (in another worktree)

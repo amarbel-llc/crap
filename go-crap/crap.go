@@ -30,6 +30,8 @@ type Writer struct {
 	printer           *message.Printer
 	streamedOutput    bool
 	ttyBuildLastLine  bool
+	statusLineActive  bool
+	statusProcessor   *StatusLineProcessor
 }
 
 func NewWriter(w io.Writer) *Writer {
@@ -96,12 +98,14 @@ func (tw *Writer) colorBailOut() string {
 }
 
 func (tw *Writer) Ok(description string) int {
+	tw.clearStatusIfActive()
 	tw.n++
 	fmt.Fprintf(tw.w, "%s %s - %s\n", tw.colorOk(), tw.formatNumber(tw.n), description)
 	return tw.n
 }
 
 func (tw *Writer) OkDiag(description string, diagnostics *Diagnostics) int {
+	tw.clearStatusIfActive()
 	tw.n++
 	fmt.Fprintf(tw.w, "%s %s - %s\n", tw.colorOk(), tw.formatNumber(tw.n), description)
 	writeDiagnostics(tw.w, diagnostics, tw.color)
@@ -113,6 +117,7 @@ func (tw *Writer) HasFailures() bool {
 }
 
 func (tw *Writer) NotOk(description string, diagnostics map[string]string) int {
+	tw.clearStatusIfActive()
 	tw.n++
 	tw.failed = true
 	fmt.Fprintf(tw.w, "%s %s - %s\n", tw.colorNotOk(), tw.formatNumber(tw.n), description)
@@ -144,12 +149,14 @@ func (tw *Writer) NotOk(description string, diagnostics map[string]string) int {
 }
 
 func (tw *Writer) Skip(description, reason string) int {
+	tw.clearStatusIfActive()
 	tw.n++
 	fmt.Fprintf(tw.w, "%s %s - %s %s %s\n", tw.colorOk(), tw.formatNumber(tw.n), description, tw.colorSkip(), reason)
 	return tw.n
 }
 
 func (tw *Writer) SkipDiag(description, reason string, diagnostics *Diagnostics) int {
+	tw.clearStatusIfActive()
 	tw.n++
 	fmt.Fprintf(tw.w, "%s %s - %s %s %s\n", tw.colorOk(), tw.formatNumber(tw.n), description, tw.colorSkip(), reason)
 	writeDiagnostics(tw.w, diagnostics, tw.color)
@@ -157,6 +164,7 @@ func (tw *Writer) SkipDiag(description, reason string, diagnostics *Diagnostics)
 }
 
 func (tw *Writer) Todo(description, reason string) int {
+	tw.clearStatusIfActive()
 	tw.n++
 	fmt.Fprintf(tw.w, "%s %s - %s %s %s\n", tw.colorNotOk(), tw.formatNumber(tw.n), description, tw.colorTodo(), reason)
 	return tw.n
@@ -176,6 +184,7 @@ func (tw *Writer) Plan() {
 }
 
 func (tw *Writer) BailOut(reason string) {
+	tw.clearStatusIfActive()
 	fmt.Fprintf(tw.w, "%s %s\n", tw.colorBailOut(), reason)
 }
 
@@ -207,11 +216,23 @@ func (tw *Writer) EnableTTYBuildLastLine() {
 }
 
 func (tw *Writer) UpdateLastLine(text string) {
-	fmt.Fprintf(tw.w, "\r\033[2K# %s", text)
+	if tw.color {
+		fmt.Fprintf(tw.w, "\r\033[2K\033[?7l# %s\033[?7h", text)
+	} else {
+		fmt.Fprintf(tw.w, "\r\033[2K# %s", text)
+	}
+	tw.statusLineActive = true
 }
 
 func (tw *Writer) FinishLastLine() {
 	fmt.Fprint(tw.w, "\r\033[2K")
+	tw.statusLineActive = false
+}
+
+func (tw *Writer) clearStatusIfActive() {
+	if tw.statusLineActive {
+		tw.FinishLastLine()
+	}
 }
 
 type Diagnostics struct {
@@ -223,10 +244,20 @@ type Diagnostics struct {
 }
 
 func sanitizeYAMLValue(value string, color bool) string {
+	var stripped string
 	if color {
-		return stripNonSGR(value)
+		stripped = stripNonSGR(value)
+	} else {
+		stripped = stripANSI(value)
 	}
-	return stripANSI(value)
+	lines := strings.Split(stripped, "\n")
+	filtered := lines[:0]
+	for _, line := range lines {
+		if strings.TrimSpace(line) != "" {
+			filtered = append(filtered, line)
+		}
+	}
+	return strings.Join(filtered, "\n")
 }
 
 func writeDiagnostics(w io.Writer, d *Diagnostics, color bool) {
@@ -357,5 +388,54 @@ func (tw *Writer) WriteAll(tests iter.Seq[TestPoint]) {
 	}
 	if !tw.planEmitted {
 		tw.Plan()
+	}
+}
+
+// StatusLineProcessor is a stateful byte buffer that splits PTY output on
+// \r and \n boundaries, trims whitespace, and filters out lines with no
+// visible content (ANSI-only or blank).
+type StatusLineProcessor struct {
+	buf []byte
+}
+
+// NewStatusLineProcessor creates a new StatusLineProcessor.
+func NewStatusLineProcessor() *StatusLineProcessor {
+	return &StatusLineProcessor{}
+}
+
+// Feed appends chunk to the internal buffer and returns all complete lines
+// that have visible content.
+func (p *StatusLineProcessor) Feed(chunk []byte) []string {
+	p.buf = append(p.buf, chunk...)
+	var lines []string
+	for {
+		pos := -1
+		for i, b := range p.buf {
+			if b == '\n' || b == '\r' {
+				pos = i
+				break
+			}
+		}
+		if pos < 0 {
+			break
+		}
+		line := string(p.buf[:pos])
+		p.buf = p.buf[pos+1:]
+		trimmed := strings.TrimSpace(line)
+		if HasVisibleContent(trimmed) {
+			lines = append(lines, trimmed)
+		}
+	}
+	return lines
+}
+
+// FeedStatusBytes is a convenience method that feeds chunk through a
+// StatusLineProcessor and calls UpdateLastLine for each visible line.
+func (tw *Writer) FeedStatusBytes(chunk []byte) {
+	if tw.statusProcessor == nil {
+		tw.statusProcessor = NewStatusLineProcessor()
+	}
+	for _, line := range tw.statusProcessor.Feed(chunk) {
+		tw.UpdateLastLine(line)
 	}
 }

@@ -153,6 +153,42 @@ func TestStripNonSGR(t *testing.T) {
 	}
 }
 
+func TestHasVisibleContentPlainText(t *testing.T) {
+	if !HasVisibleContent("hello") {
+		t.Error("expected true for plain text")
+	}
+}
+
+func TestHasVisibleContentEmpty(t *testing.T) {
+	if HasVisibleContent("") {
+		t.Error("expected false for empty string")
+	}
+}
+
+func TestHasVisibleContentWhitespaceOnly(t *testing.T) {
+	if HasVisibleContent("  \t  ") {
+		t.Error("expected false for whitespace only")
+	}
+}
+
+func TestHasVisibleContentANSIOnly(t *testing.T) {
+	if HasVisibleContent("\033[32m\033[0m") {
+		t.Error("expected false for ANSI-only")
+	}
+}
+
+func TestHasVisibleContentANSIWithText(t *testing.T) {
+	if !HasVisibleContent("\033[32mhello\033[0m") {
+		t.Error("expected true for ANSI with text")
+	}
+}
+
+func TestHasVisibleContentControlCharsOnly(t *testing.T) {
+	if HasVisibleContent("\x01\x02\x03") {
+		t.Error("expected false for control chars only")
+	}
+}
+
 func TestClassifyComment(t *testing.T) {
 	tests := []struct {
 		line string

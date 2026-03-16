@@ -43,6 +43,30 @@ func stripNonSGR(s string) string {
 	return nonSGRRegexp.ReplaceAllString(s, "")
 }
 
+// HasVisibleContent returns true if s contains at least one visible character
+// after stripping ANSI CSI sequences, whitespace, and control characters.
+func HasVisibleContent(s string) bool {
+	i := 0
+	for i < len(s) {
+		if s[i] == '\x1b' && i+1 < len(s) && s[i+1] == '[' {
+			// Skip CSI sequence: ESC [ <params> <final byte>
+			i += 2
+			for i < len(s) && (s[i] < '@' || s[i] > '~') {
+				i++
+			}
+			if i < len(s) {
+				i++ // skip final byte
+			}
+		} else if s[i] > ' ' && s[i] < 0x7f || s[i] > 0x7f {
+			// Visible: printable ASCII (excluding space) or non-ASCII
+			return true
+		} else {
+			i++
+		}
+	}
+	return false
+}
+
 func classifyLine(line string) lineKind {
 	if line == "CRAP version 2" {
 		return lineVersion

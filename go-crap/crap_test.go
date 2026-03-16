@@ -915,3 +915,185 @@ func TestPragmaTracksTTYBuildLastLine(t *testing.T) {
 		t.Error("expected ttyBuildLastLine to be true after Pragma call")
 	}
 }
+
+// --- DECAWM wrapping ---
+
+func TestUpdateLastLineDECAWMWithColor(t *testing.T) {
+	var buf bytes.Buffer
+	tw := NewColorWriter(&buf, true)
+	tw.EnableTTYBuildLastLine()
+	tw.UpdateLastLine("building...")
+	out := buf.String()
+	if !strings.Contains(out, "\033[?7l# building...\033[?7h") {
+		t.Errorf("expected DECAWM wrapping in color mode, got:\n%q", out)
+	}
+}
+
+func TestUpdateLastLineNoDECAWMWithoutColor(t *testing.T) {
+	var buf bytes.Buffer
+	tw := NewWriter(&buf)
+	tw.EnableTTYBuildLastLine()
+	tw.UpdateLastLine("building...")
+	out := buf.String()
+	if strings.Contains(out, "\033[?7") {
+		t.Errorf("expected no DECAWM without color, got:\n%q", out)
+	}
+	if !strings.Contains(out, "\r\033[2K# building...") {
+		t.Errorf("expected plain status line, got:\n%q", out)
+	}
+}
+
+// --- Auto-clear ---
+
+func TestOkAutoClearsStatusLine(t *testing.T) {
+	var buf bytes.Buffer
+	tw := NewWriter(&buf)
+	tw.EnableTTYBuildLastLine()
+	tw.UpdateLastLine("building...")
+	tw.Ok("build done")
+	out := buf.String()
+	// Should contain a FinishLastLine (\r\033[2K) before the ok line
+	okIdx := strings.Index(out, "ok 1 - build done")
+	clearIdx := strings.LastIndex(out[:okIdx], "\r\033[2K")
+	if clearIdx < 0 {
+		t.Errorf("expected auto-clear before ok line, got:\n%q", out)
+	}
+}
+
+func TestTestPointNoClearWithoutActiveStatus(t *testing.T) {
+	var buf bytes.Buffer
+	tw := NewWriter(&buf)
+	tw.Ok("test")
+	out := buf.String()
+	// Only the version header + ok line, no clear sequence
+	expected := "CRAP version 2\nok 1 - test\n"
+	if out != expected {
+		t.Errorf("expected:\n%q\ngot:\n%q", expected, out)
+	}
+}
+
+func TestNotOkAutoClearsStatusLine(t *testing.T) {
+	var buf bytes.Buffer
+	tw := NewWriter(&buf)
+	tw.EnableTTYBuildLastLine()
+	tw.UpdateLastLine("building...")
+	tw.NotOk("build failed", nil)
+	out := buf.String()
+	notOkIdx := strings.Index(out, "not ok 1 - build failed")
+	clearIdx := strings.LastIndex(out[:notOkIdx], "\r\033[2K")
+	if clearIdx < 0 {
+		t.Errorf("expected auto-clear before not ok line, got:\n%q", out)
+	}
+}
+
+// --- StatusLineProcessor ---
+
+func TestStatusLineProcessorSplitsOnNewline(t *testing.T) {
+	p := NewStatusLineProcessor()
+	lines := p.Feed([]byte("hello\nworld\n"))
+	if len(lines) != 2 || lines[0] != "hello" || lines[1] != "world" {
+		t.Errorf("expected [hello world], got %v", lines)
+	}
+}
+
+func TestStatusLineProcessorSplitsOnCR(t *testing.T) {
+	p := NewStatusLineProcessor()
+	lines := p.Feed([]byte("line1\rline2\r"))
+	if len(lines) != 2 || lines[0] != "line1" || lines[1] != "line2" {
+		t.Errorf("expected [line1 line2], got %v", lines)
+	}
+}
+
+func TestStatusLineProcessorBuffersPartial(t *testing.T) {
+	p := NewStatusLineProcessor()
+	lines := p.Feed([]byte("hell"))
+	if len(lines) != 0 {
+		t.Errorf("expected no lines for partial input, got %v", lines)
+	}
+	lines = p.Feed([]byte("o\n"))
+	if len(lines) != 1 || lines[0] != "hello" {
+		t.Errorf("expected [hello], got %v", lines)
+	}
+}
+
+func TestStatusLineProcessorFiltersEmpty(t *testing.T) {
+	p := NewStatusLineProcessor()
+	lines := p.Feed([]byte("\n\n\n"))
+	if len(lines) != 0 {
+		t.Errorf("expected no lines for empty lines, got %v", lines)
+	}
+}
+
+func TestStatusLineProcessorFiltersANSIOnly(t *testing.T) {
+	p := NewStatusLineProcessor()
+	lines := p.Feed([]byte("\033[32m\033[0m\nvisible\n"))
+	if len(lines) != 1 || lines[0] != "visible" {
+		t.Errorf("expected [visible], got %v", lines)
+	}
+}
+
+func TestStatusLineProcessorTrimsWhitespace(t *testing.T) {
+	p := NewStatusLineProcessor()
+	lines := p.Feed([]byte("  hello  \n"))
+	if len(lines) != 1 || lines[0] != "hello" {
+		t.Errorf("expected [hello], got %v", lines)
+	}
+}
+
+func TestStatusLineProcessorHandlesCRLF(t *testing.T) {
+	p := NewStatusLineProcessor()
+	lines := p.Feed([]byte("hello\r\nworld\r\n"))
+	if len(lines) != 2 || lines[0] != "hello" || lines[1] != "world" {
+		t.Errorf("expected [hello world], got %v", lines)
+	}
+}
+
+// --- FeedStatusBytes ---
+
+func TestFeedStatusBytesUpdatesStatusLine(t *testing.T) {
+	var buf bytes.Buffer
+	tw := NewColorWriter(&buf, true)
+	tw.EnableTTYBuildLastLine()
+	tw.FeedStatusBytes([]byte("building...\ncompiling...\n"))
+	out := buf.String()
+	if !strings.Contains(out, "# building...") {
+		t.Errorf("expected building status line, got:\n%q", out)
+	}
+	if !strings.Contains(out, "# compiling...") {
+		t.Errorf("expected compiling status line, got:\n%q", out)
+	}
+}
+
+// --- Blank-line filtering in sanitizeYAMLValue ---
+
+func TestSanitizeYAMLValueFiltersBlankLines(t *testing.T) {
+	result := sanitizeYAMLValue("line one\n\n\nline two\n  \nline three", false)
+	if strings.Contains(result, "\n\n") {
+		t.Errorf("expected blank lines filtered, got:\n%q", result)
+	}
+	if !strings.Contains(result, "line one\nline two\nline three") {
+		t.Errorf("expected filtered result, got:\n%q", result)
+	}
+}
+
+func TestNotOkMultilineFiltersBlankLines(t *testing.T) {
+	var buf bytes.Buffer
+	tw := NewWriter(&buf)
+	tw.NotOk("test", map[string]string{
+		"output": "line one\n\nline two",
+	})
+	out := buf.String()
+	if !strings.Contains(out, "output: |\n") {
+		t.Errorf("expected block scalar, got:\n%s", out)
+	}
+	if !strings.Contains(out, "    line one\n") {
+		t.Errorf("expected line one, got:\n%s", out)
+	}
+	if !strings.Contains(out, "    line two\n") {
+		t.Errorf("expected line two, got:\n%s", out)
+	}
+	// No blank indented line
+	if strings.Contains(out, "    \n") {
+		t.Errorf("expected no blank lines in YAML block, got:\n%s", out)
+	}
+}

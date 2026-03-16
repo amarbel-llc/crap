@@ -90,6 +90,24 @@
           };
         };
 
+        crappy-brew = pkgs.buildGoModule {
+          pname = "crappy-brew";
+          version = "0.1.0";
+          src = ./go-crap;
+          subPackages = [ "cmd/crappy-brew" ];
+          vendorHash = "sha256-5Pb0w+3v+R9ciPQ4H0HyFZlIJPOGjFFURDwLl2JvLjs=";
+
+          postInstall = ''
+            mv $out/bin/crappy-brew "$out/bin/::brew"
+          '';
+
+          meta = {
+            description = "Brew wrapper that emits CRAP-2 output";
+            homepage = "https://github.com/amarbel-llc/crap";
+            license = pkgs.lib.licenses.mit;
+          };
+        };
+
         rust-crap = pkgs.rustPlatform.buildRustPackage {
           pname = "rust-crap";
           version = "0.1.0";
@@ -111,9 +129,15 @@
             paths = [
               large-colon
               crappy-git
+              crappy-brew
             ];
           };
-          inherit large-colon crappy-git rust-crap;
+          inherit
+            large-colon
+            crappy-git
+            crappy-brew
+            rust-crap
+            ;
         };
 
         devShells.default = pkgs.mkShell {

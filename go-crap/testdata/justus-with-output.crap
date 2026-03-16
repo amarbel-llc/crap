@@ -1,0 +1,14 @@
+CRAP-2
+1::2
+# build output line 1
+# build output line 2
+ok 1 - build
+not ok 2 - test
+  ---
+  message: assertion failed
+  severity: fail
+  exitcode: 1
+  output: |
+    running tests...
+    FAILED test_foo
+  ...

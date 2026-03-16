@@ -45,6 +45,18 @@ func NewColorWriter(w io.Writer, color bool) *Writer {
 	return &Writer{w: w, color: color}
 }
 
+// NewBareWriter creates a Writer that does not emit the CRAP-2 version line
+// or any pragma lines. Use this for incremental emission after a normal Writer
+// has already emitted the header and plan.
+func NewBareWriter(w io.Writer) *Writer {
+	return &Writer{w: w}
+}
+
+// NewBareColorWriter creates a bare Writer with ANSI color support.
+func NewBareColorWriter(w io.Writer, color bool) *Writer {
+	return &Writer{w: w, color: color}
+}
+
 func NewLocaleWriter(w io.Writer, locale language.Tag) *Writer {
 	fmt.Fprintln(w, "CRAP-2")
 	fmt.Fprintf(w, "pragma +locale-formatting:%s\n", locale)
@@ -203,6 +215,12 @@ func (tw *Writer) Plan() {
 	}
 	tw.planEmitted = true
 	fmt.Fprintf(tw.w, "1::%s\n", tw.formatNumber(tw.n))
+}
+
+func (tw *Writer) PlanSkip(reason string) {
+	tw.clearStatusIfActive()
+	tw.planEmitted = true
+	fmt.Fprintf(tw.w, "1::0 # SKIP %s\n", reason)
 }
 
 func (tw *Writer) BailOut(reason string) {
@@ -413,6 +431,87 @@ func (tw *Writer) WriteAll(tests iter.Seq[TestPoint]) {
 	}
 	if !tw.planEmitted {
 		tw.Plan()
+	}
+}
+
+// ExecTestResult represents the outcome of a single command/recipe execution.
+// Mirrors rust-crap's TestResult struct used by just-us.
+type ExecTestResult struct {
+	Number       int    // explicit test number for display; 0 means use auto-increment
+	Name         string
+	OK           bool
+	Directive    string // generic comment (e.g. recipe doc), not a SKIP/TODO/WARN directive
+	ErrorMessage string
+	ExitCode     *int
+	Output       string
+	SuppressYAML bool
+}
+
+// EmitTestResult writes a test point with optional YAML diagnostics.
+// Mirrors rust-crap's test_point() method.
+func (tw *Writer) EmitTestResult(r *ExecTestResult) int {
+	tw.clearStatusIfActive()
+	tw.n++
+	if !r.OK {
+		tw.failed = true
+	}
+
+	status := tw.colorOk()
+	if !r.OK {
+		status = tw.colorNotOk()
+	}
+
+	// Use explicit number for display if provided, but always increment internal counter.
+	displayNum := tw.n
+	if r.Number > 0 {
+		displayNum = r.Number
+	}
+	num := tw.formatNumber(displayNum)
+
+	if r.Directive != "" {
+		fmt.Fprintf(tw.w, "%s %s - %s # %s\n", status, num, r.Name, r.Directive)
+	} else {
+		fmt.Fprintf(tw.w, "%s %s - %s\n", status, num, r.Name)
+	}
+
+	if !r.SuppressYAML && hasExecYAMLContent(r) {
+		fmt.Fprintln(tw.w, "  ---")
+		if r.ErrorMessage != "" {
+			writeExecYAMLField(tw.w, "message", sanitizeYAMLValue(r.ErrorMessage, tw.color))
+		}
+		if !r.OK {
+			fmt.Fprintln(tw.w, "  severity: fail")
+		}
+		if r.ExitCode != nil {
+			fmt.Fprintf(tw.w, "  exitcode: %d\n", *r.ExitCode)
+		}
+		if r.Output != "" {
+			writeExecYAMLField(tw.w, "output", sanitizeYAMLValue(r.Output, tw.color))
+		}
+		fmt.Fprintln(tw.w, "  ...")
+	}
+
+	return tw.n
+}
+
+// hasExecYAMLContent returns true if the result has content for a YAML block.
+// Any failing test gets at least severity: fail.
+func hasExecYAMLContent(r *ExecTestResult) bool {
+	return !r.OK || r.ErrorMessage != "" || r.ExitCode != nil || r.Output != ""
+}
+
+func writeExecYAMLField(w io.Writer, key, value string) {
+	if strings.Contains(value, "\n") {
+		fmt.Fprintf(w, "  %s: |\n", key)
+		lines := strings.Split(value, "\n")
+		for len(lines) > 0 && lines[len(lines)-1] == "" {
+			lines = lines[:len(lines)-1]
+		}
+		for _, line := range lines {
+			fmt.Fprintf(w, "    %s\n", line)
+		}
+	} else {
+		fmt.Fprintf(w, "  %s: %s\n", key, value)
 	}
 }
 

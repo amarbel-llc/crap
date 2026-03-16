@@ -1104,6 +1104,115 @@ func TestSanitizeYAMLValueFiltersBlankLines(t *testing.T) {
 	}
 }
 
+func TestNewBareWriter(t *testing.T) {
+	var buf bytes.Buffer
+	tw := NewBareWriter(&buf)
+	tw.Ok("hello")
+	tw.Plan()
+
+	got := buf.String()
+	want := "ok 1 - hello\n1::1\n"
+	if got != want {
+		t.Errorf("got:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func intPtr(n int) *int { return &n }
+
+func TestWriterEmitTestResultFail(t *testing.T) {
+	var buf bytes.Buffer
+	tw := NewBareWriter(&buf)
+	tw.EmitTestResult(&ExecTestResult{
+		Name:         "build",
+		OK:           false,
+		ErrorMessage: "exit code 1",
+		ExitCode:     intPtr(1),
+	})
+	tw.Plan()
+
+	got := buf.String()
+	if !strings.Contains(got, "not ok 1 - build") {
+		t.Errorf("missing test point line in:\n%s", got)
+	}
+	if !strings.Contains(got, "  ---") {
+		t.Errorf("missing YAML start in:\n%s", got)
+	}
+	if !strings.Contains(got, "  message: exit code 1") {
+		t.Errorf("missing message in:\n%s", got)
+	}
+	if !strings.Contains(got, "  severity: fail") {
+		t.Errorf("missing severity in:\n%s", got)
+	}
+	if !strings.Contains(got, "  exitcode: 1") {
+		t.Errorf("missing exitcode in:\n%s", got)
+	}
+	if !strings.Contains(got, "  ...") {
+		t.Errorf("missing YAML end in:\n%s", got)
+	}
+}
+
+func TestWriterEmitTestResultBareFail(t *testing.T) {
+	var buf bytes.Buffer
+	tw := NewBareWriter(&buf)
+	tw.EmitTestResult(&ExecTestResult{
+		Name: "bare-fail",
+		OK:   false,
+	})
+	tw.Plan()
+
+	got := buf.String()
+	if !strings.Contains(got, "  severity: fail") {
+		t.Errorf("bare failing test should still get severity YAML:\n%s", got)
+	}
+}
+
+func TestWriterEmitTestResultSuppressYAML(t *testing.T) {
+	var buf bytes.Buffer
+	tw := NewBareWriter(&buf)
+	tw.EmitTestResult(&ExecTestResult{
+		Name:         "build",
+		OK:           false,
+		ErrorMessage: "exit code 1",
+		ExitCode:     intPtr(1),
+		SuppressYAML: true,
+	})
+	tw.Plan()
+
+	got := buf.String()
+	if strings.Contains(got, "---") {
+		t.Errorf("YAML block should be suppressed:\n%s", got)
+	}
+}
+
+func TestWriterEmitTestResultDirective(t *testing.T) {
+	var buf bytes.Buffer
+	tw := NewBareWriter(&buf)
+	tw.EmitTestResult(&ExecTestResult{
+		Name:      "build",
+		OK:        true,
+		Directive: "compiles the project",
+	})
+	tw.Plan()
+
+	got := buf.String()
+	want := "ok 1 - build # compiles the project\n1::1\n"
+	if got != want {
+		t.Errorf("got:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func TestWriterPlanSkip(t *testing.T) {
+	var buf bytes.Buffer
+	tw := NewBareWriter(&buf)
+	tw.PlanSkip("no tests to run")
+
+	got := buf.String()
+	want := "1::0 # SKIP no tests to run\n"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
 func TestNotOkMultilineFiltersBlankLines(t *testing.T) {
 	var buf bytes.Buffer
 	tw := NewWriter(&buf)
@@ -1123,5 +1232,102 @@ func TestNotOkMultilineFiltersBlankLines(t *testing.T) {
 	// No blank indented line
 	if strings.Contains(out, "    \n") {
 		t.Errorf("expected no blank lines in YAML block, got:\n%s", out)
+	}
+}
+
+func TestRoundTripWriterReader(t *testing.T) {
+	var buf bytes.Buffer
+	tw := NewWriter(&buf)
+
+	tw.EmitTestResult(&ExecTestResult{Name: "pass", OK: true})
+	tw.EmitTestResult(&ExecTestResult{
+		Name:         "fail",
+		OK:           false,
+		ErrorMessage: "assertion failed",
+		ExitCode:     intPtr(1),
+		Output:       "some output\nmore output",
+	})
+	tw.EmitTestResult(&ExecTestResult{
+		Name:         "quiet-fail",
+		OK:           false,
+		ErrorMessage: "silent",
+		SuppressYAML: true,
+	})
+	tw.EmitTestResult(&ExecTestResult{
+		Name:      "documented",
+		OK:        true,
+		Directive: "builds the project",
+	})
+	tw.Plan()
+
+	reader := NewReader(strings.NewReader(buf.String()))
+	summary := reader.Summary()
+	diags := reader.Diagnostics()
+
+	var errors []Diagnostic
+	for _, d := range diags {
+		if d.Severity == SeverityError {
+			errors = append(errors, d)
+		}
+	}
+
+	if len(errors) > 0 {
+		t.Errorf("round-trip produced validation errors:")
+		for _, d := range errors {
+			t.Errorf("  line %d: [%s] %s", d.Line, d.Rule, d.Message)
+		}
+		t.Logf("output was:\n%s", buf.String())
+	}
+
+	if summary.TotalTests != 4 {
+		t.Errorf("expected 4 tests, got %d", summary.TotalTests)
+	}
+	if summary.Passed != 2 {
+		t.Errorf("expected 2 passed, got %d", summary.Passed)
+	}
+	if summary.Failed != 2 {
+		t.Errorf("expected 2 failed, got %d", summary.Failed)
+	}
+}
+
+func TestRoundTripPlanSkip(t *testing.T) {
+	var buf bytes.Buffer
+	tw := NewWriter(&buf)
+	tw.PlanSkip("nothing to do")
+
+	reader := NewReader(strings.NewReader(buf.String()))
+	summary := reader.Summary()
+
+	if !summary.Valid {
+		t.Errorf("plan-skip output not valid: %v", reader.Diagnostics())
+		t.Logf("output was:\n%s", buf.String())
+	}
+	if summary.PlanCount != 0 {
+		t.Errorf("expected plan count 0, got %d", summary.PlanCount)
+	}
+}
+
+func TestRoundTripBareWriter(t *testing.T) {
+	var buf bytes.Buffer
+
+	// Simulate just-us pattern: full writer for header + plan, bare writers for test points
+	tw := NewWriter(&buf)
+	tw.PlanAhead(2)
+
+	bare1 := NewBareWriter(&buf)
+	bare1.EmitTestResult(&ExecTestResult{Number: 1, Name: "a", OK: true})
+
+	bare2 := NewBareWriter(&buf)
+	bare2.EmitTestResult(&ExecTestResult{Number: 2, Name: "b", OK: true, Directive: "doc comment"})
+
+	reader := NewReader(strings.NewReader(buf.String()))
+	summary := reader.Summary()
+
+	if !summary.Valid {
+		t.Errorf("bare writer round-trip not valid: %v", reader.Diagnostics())
+		t.Logf("output was:\n%s", buf.String())
+	}
+	if summary.TotalTests != 2 {
+		t.Errorf("expected 2 tests, got %d", summary.TotalTests)
 	}
 }

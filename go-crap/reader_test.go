@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"testing"
 
@@ -604,5 +605,121 @@ func TestReaderLocaleRoundTrip(t *testing.T) {
 	}
 	if summary.PlanCount != 1234 {
 		t.Errorf("expected plan count 1234, got %d", summary.PlanCount)
+	}
+}
+
+func TestReaderGenericDirectiveComment(t *testing.T) {
+	input := "CRAP-2\nok 1 - test # runs the test suite\n1::1\n"
+	reader := NewReader(strings.NewReader(input))
+	summary := reader.Summary()
+	if !summary.Valid {
+		t.Errorf("expected valid stream, got invalid")
+	}
+	if summary.Passed != 1 {
+		t.Errorf("expected 1 passed, got %d", summary.Passed)
+	}
+}
+
+func TestReaderPlanSkip(t *testing.T) {
+	input := "CRAP-2\n1::0 # SKIP no tests to run\n"
+	reader := NewReader(strings.NewReader(input))
+	summary := reader.Summary()
+	if !summary.Valid {
+		t.Errorf("expected valid stream, got invalid; diags: %v", reader.Diagnostics())
+	}
+	if summary.TotalTests != 0 {
+		t.Errorf("expected 0 tests, got %d", summary.TotalTests)
+	}
+	if summary.PlanCount != 0 {
+		t.Errorf("expected plan count 0, got %d", summary.PlanCount)
+	}
+}
+
+func TestReaderYAMLBlockLiteral(t *testing.T) {
+	input := "CRAP-2\nnot ok 1 - test\n  ---\n  message: |\n    line one\n    line two\n  severity: fail\n  ...\n1::1\n"
+	reader := NewReader(strings.NewReader(input))
+	var yamlEvent Event
+	for {
+		ev, err := reader.Next()
+		if err != nil {
+			break
+		}
+		if ev.Type == EventYAMLDiagnostic {
+			yamlEvent = ev
+		}
+	}
+
+	if yamlEvent.YAML == nil {
+		t.Fatal("expected YAML event")
+	}
+	if yamlEvent.YAML["message"] != "line one\nline two" {
+		t.Errorf("expected multi-line message, got %q", yamlEvent.YAML["message"])
+	}
+	if yamlEvent.YAML["severity"] != "fail" {
+		t.Errorf("expected severity=fail, got %q", yamlEvent.YAML["severity"])
+	}
+}
+
+func TestReaderJustUsGoldenBasic(t *testing.T) {
+	f, err := os.Open("testdata/justus-basic.crap")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+
+	reader := NewReader(f)
+	summary := reader.Summary()
+	diags := reader.Diagnostics()
+
+	var errors []Diagnostic
+	for _, d := range diags {
+		if d.Severity == SeverityError {
+			errors = append(errors, d)
+		}
+	}
+
+	if len(errors) > 0 {
+		for _, d := range errors {
+			t.Errorf("line %d: %s: [%s] %s", d.Line, d.Severity, d.Rule, d.Message)
+		}
+	}
+
+	if summary.TotalTests != 3 {
+		t.Errorf("expected 3 total tests, got %d", summary.TotalTests)
+	}
+	if summary.Passed != 2 {
+		t.Errorf("expected 2 passed, got %d", summary.Passed)
+	}
+	if summary.Failed != 1 {
+		t.Errorf("expected 1 failed, got %d", summary.Failed)
+	}
+}
+
+func TestReaderJustUsGoldenWithOutput(t *testing.T) {
+	f, err := os.Open("testdata/justus-with-output.crap")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+
+	reader := NewReader(f)
+	summary := reader.Summary()
+	diags := reader.Diagnostics()
+
+	var errors []Diagnostic
+	for _, d := range diags {
+		if d.Severity == SeverityError {
+			errors = append(errors, d)
+		}
+	}
+
+	if len(errors) > 0 {
+		for _, d := range errors {
+			t.Errorf("line %d: %s: [%s] %s", d.Line, d.Severity, d.Rule, d.Message)
+		}
+	}
+
+	if !summary.Valid {
+		t.Errorf("expected valid stream")
 	}
 }

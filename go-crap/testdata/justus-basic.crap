@@ -1,0 +1,10 @@
+CRAP-2
+1::3
+ok 1 - build
+ok 2 - test # runs the test suite
+not ok 3 - lint
+  ---
+  message: clippy found 2 warnings
+  severity: fail
+  exitcode: 1
+  ...

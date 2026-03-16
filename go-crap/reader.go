@@ -42,6 +42,8 @@ type Reader struct {
 	done             bool
 	bailed           bool
 	yamlBuf          map[string]string
+	yamlBlockKey     string // current block literal key, empty = not in block
+	yamlBlockIndent  int    // expected indent for block literal continuation lines
 	lastWasTestPoint bool
 	passed           int
 	failed           int
@@ -101,8 +103,33 @@ func (r *Reader) Next() (Event, error) {
 
 		// Handle YAML block state
 		if r.state == stateYAML {
-			expectedIndent := (r.currentFrame().depth * 4) + 2
-			if raw == strings.Repeat(" ", expectedIndent)+"..." {
+			yamlBaseIndent := (r.currentFrame().depth * 4) + 2
+
+			// Handle block literal continuation
+			if r.yamlBlockKey != "" {
+				lineIndent := len(raw) - len(strings.TrimLeft(raw, " "))
+
+				if raw == strings.Repeat(" ", yamlBaseIndent)+"..." {
+					// End of YAML block — finalize block literal, fall through to end marker
+					r.yamlBlockKey = ""
+				} else if lineIndent <= yamlBaseIndent && strings.TrimSpace(raw) != "" {
+					// Not a continuation — end block, fall through to key:value parsing
+					r.yamlBlockKey = ""
+				} else {
+					// Continuation line — strip the block indent, use original to preserve ANSI
+					stripped := original
+					if len(stripped) >= r.yamlBlockIndent {
+						stripped = stripped[r.yamlBlockIndent:]
+					}
+					if r.yamlBuf[r.yamlBlockKey] != "" {
+						r.yamlBuf[r.yamlBlockKey] += "\n"
+					}
+					r.yamlBuf[r.yamlBlockKey] += strings.TrimRight(stripped, " ")
+					continue
+				}
+			}
+
+			if raw == strings.Repeat(" ", yamlBaseIndent)+"..." {
 				r.state = stateBody
 				yaml := r.yamlBuf
 				r.yamlBuf = nil
@@ -118,14 +145,20 @@ func (r *Reader) Next() (Event, error) {
 			// preserve ANSI SGR sequences in values, per the ANSI
 			// in YAML Output Blocks amendment.
 			content := original
-			if len(content) >= expectedIndent {
-				content = content[expectedIndent:]
+			if len(content) >= yamlBaseIndent {
+				content = content[yamlBaseIndent:]
 			}
 			parts := strings.SplitN(content, ":", 2)
 			if len(parts) == 2 {
 				key := strings.TrimSpace(parts[0])
 				val := strings.TrimSpace(parts[1])
-				r.yamlBuf[key] = val
+				if val == "|" {
+					r.yamlBlockKey = key
+					r.yamlBlockIndent = yamlBaseIndent + 2
+					r.yamlBuf[key] = ""
+				} else {
+					r.yamlBuf[key] = val
+				}
 			}
 			continue
 		}

@@ -416,3 +416,88 @@ func TestGitFetchPhases(t *testing.T) {
 		}
 	}
 }
+
+func TestGitRebasePhases(t *testing.T) {
+	parser := NewGitRebaseParser()
+
+	tests := []struct {
+		line  string
+		phase string
+	}{
+		{"Created autostash: e55899e", "stash"},
+		{"Applied autostash.", "stash"},
+		{"Dropped refs/stash@{0} (abc1234)", "stash"},
+		{"Current branch lucid-aspen is up to date.", "rebase"},
+		{"Updating abc1234..def5678", "rebase"},
+		{"Fast-forward", "rebase"},
+		{"Successfully rebased and updated refs/heads/feature.", "rebase"},
+		{"Applying: fix something", "rebase"},
+		{"Rebasing (1/3)", "rebase"},
+		{"CONFLICT (content): Merge conflict in file.go", "rebase"},
+		{"Auto-merging file.go", "rebase"},
+		{"Already up to date.", "rebase"},
+		{" file.go | 3 +++", "summary"},
+		{" 1 file changed, 3 insertions(+)", "summary"},
+		{" 2 files changed, 10 insertions(+), 5 deletions(-)", "summary"},
+	}
+
+	for _, tt := range tests {
+		got := parser.Classify(tt.line)
+		if got != tt.phase {
+			t.Errorf("Classify(%q) = %q, want %q", tt.line, got, tt.phase)
+		}
+	}
+}
+
+func TestEmitGitRebaseUpToDate(t *testing.T) {
+	var buf bytes.Buffer
+	tw := NewColorWriter(&buf, false)
+	tw.EnableTTYBuildLastLine()
+
+	lines := []string{
+		"Created autostash: e55899e",
+		"Current branch lucid-aspen is up to date.",
+		"Applied autostash.",
+	}
+
+	emitPhases(tw, NewGitRebaseParser(), lines, 0, "git")
+	tw.Plan()
+
+	out := stripANSIAndControl(buf.String())
+	if !strings.Contains(out, "ok 1 - stash") {
+		t.Errorf("expected stash test point, got:\n%s", out)
+	}
+	if !strings.Contains(out, "ok 2 - rebase") {
+		t.Errorf("expected rebase test point, got:\n%s", out)
+	}
+	if !strings.Contains(out, "1::2") {
+		t.Errorf("expected plan 1::2, got:\n%s", out)
+	}
+}
+
+func TestEmitGitRebaseWithSummary(t *testing.T) {
+	var buf bytes.Buffer
+	tw := NewColorWriter(&buf, false)
+	tw.EnableTTYBuildLastLine()
+
+	lines := []string{
+		"Updating abc1234..def5678",
+		"Fast-forward",
+		" file.go | 3 +++",
+		" 1 file changed, 3 insertions(+)",
+	}
+
+	emitPhases(tw, NewGitRebaseParser(), lines, 0, "git")
+	tw.Plan()
+
+	out := stripANSIAndControl(buf.String())
+	if !strings.Contains(out, "ok 1 - rebase") {
+		t.Errorf("expected rebase test point, got:\n%s", out)
+	}
+	if !strings.Contains(out, "ok 2 - summary") {
+		t.Errorf("expected summary test point, got:\n%s", out)
+	}
+	if !strings.Contains(out, "1::2") {
+		t.Errorf("expected plan 1::2, got:\n%s", out)
+	}
+}

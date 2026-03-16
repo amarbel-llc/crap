@@ -118,13 +118,15 @@ func parserForSubcommand(args []string) *PhaseParser {
 		return NewGitCloneParser()
 	case "fetch":
 		return NewGitFetchParser()
+	case "rebase":
+		return NewGitRebaseParser()
 	default:
 		return nil
 	}
 }
 
 // ConvertGit runs git with args and writes CRAP-2 output. For recognized
-// subcommands (pull, push, clone, fetch) it emits semantic phase test points.
+// subcommands (pull, push, clone, fetch, rebase) it emits semantic phase test points.
 // For all others it passes through stdin/stdout/stderr directly to git.
 // selfExe is the path to the running binary, used to avoid exec recursion
 // when the user renames ::git to "git".
@@ -248,6 +250,48 @@ func classifyFetchLine(line string) string {
 		strings.HasPrefix(trimmed, "From ") ||
 		(len(line) > 0 && line[0] == ' ' && strings.Contains(trimmed, "->")) {
 		return "negotiate"
+	}
+
+	return ""
+}
+
+// NewGitRebaseParser returns a parser for git rebase output phases:
+// stash, rebase, summary.
+func NewGitRebaseParser() *PhaseParser {
+	return &PhaseParser{
+		phaseOrder: []string{"stash", "rebase", "summary"},
+		classify:   classifyRebaseLine,
+		phases:     make(map[string]*Phase),
+	}
+}
+
+func classifyRebaseLine(line string) string {
+	trimmed := strings.TrimSpace(line)
+
+	if strings.HasPrefix(trimmed, "Created autostash:") ||
+		trimmed == "Applied autostash." ||
+		strings.HasPrefix(trimmed, "Dropped refs/stash") {
+		return "stash"
+	}
+
+	if strings.HasPrefix(trimmed, "Current branch ") ||
+		strings.HasPrefix(trimmed, "Updating ") ||
+		trimmed == "Fast-forward" ||
+		strings.HasPrefix(trimmed, "Successfully rebased") ||
+		strings.HasPrefix(trimmed, "Applying: ") ||
+		strings.HasPrefix(trimmed, "Rebasing (") ||
+		strings.HasPrefix(trimmed, "CONFLICT ") ||
+		strings.HasPrefix(trimmed, "Auto-merging ") ||
+		trimmed == "Already up to date." {
+		return "rebase"
+	}
+
+	if (len(line) > 0 && line[0] == ' ' && strings.Contains(trimmed, "|")) ||
+		strings.Contains(trimmed, "file changed") ||
+		strings.Contains(trimmed, "files changed") ||
+		strings.Contains(trimmed, "insertion") ||
+		strings.Contains(trimmed, "deletion") {
+		return "summary"
 	}
 
 	return ""

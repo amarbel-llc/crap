@@ -27,7 +27,7 @@ func main() {
 	}
 
 	color := stdoutIsTerminal()
-	exitCode := crap.ConvertGit(ctx, selfExe, os.Args[1:], os.Stdout, false, color)
+	exitCode := crap.ConvertGit(ctx, selfExe, os.Args[1:], os.Stdout, os.Stdin, os.Stderr, false, color)
 	if exitCode != 0 {
 		os.Exit(exitCode)
 	}

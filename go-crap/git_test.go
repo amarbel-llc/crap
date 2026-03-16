@@ -218,7 +218,7 @@ func TestEmitGitPhasesSuccess(t *testing.T) {
 		" 1 file changed, 3 insertions(+)",
 	}
 
-	emitGitPhases(tw, NewGitPullParser(), lines, 0)
+	emitPhases(tw, NewGitPullParser(), lines, 0, "git")
 	tw.Plan()
 
 	out := stripANSIAndControl(buf.String())
@@ -244,7 +244,7 @@ func TestEmitGitPhasesAlreadyUpToDate(t *testing.T) {
 	tw := NewColorWriter(&buf, false)
 	tw.EnableTTYBuildLastLine()
 
-	emitGitPhases(tw, NewGitPullParser(), []string{"Already up to date."}, 0)
+	emitPhases(tw, NewGitPullParser(), []string{"Already up to date."}, 0, "git")
 	tw.Plan()
 
 	out := stripANSIAndControl(buf.String())
@@ -261,7 +261,7 @@ func TestEmitGitPhasesFailure(t *testing.T) {
 	tw := NewColorWriter(&buf, false)
 	tw.EnableTTYBuildLastLine()
 
-	emitGitPhases(tw, NewGitPullParser(), []string{"fatal: not a git repository"}, 128)
+	emitPhases(tw, NewGitPullParser(), []string{"fatal: not a git repository"}, 128, "git")
 	tw.Plan()
 
 	out := stripANSIAndControl(buf.String())
@@ -286,7 +286,7 @@ func TestEmitGitPushPhases(t *testing.T) {
 		"   abc1234..def5678  main -> main",
 	}
 
-	emitGitPhases(tw, NewGitPushParser(), lines, 0)
+	emitPhases(tw, NewGitPushParser(), lines, 0, "git")
 	tw.Plan()
 
 	out := stripANSIAndControl(buf.String())
@@ -301,40 +301,11 @@ func TestEmitGitPushPhases(t *testing.T) {
 	}
 }
 
-func TestEmitGitGenericSuccess(t *testing.T) {
-	var buf bytes.Buffer
-	tw := NewColorWriter(&buf, false)
-
-	emitGitGeneric(tw, []string{"version"}, []string{"git version 2.40.0"}, 0)
-	tw.Plan()
-
-	out := buf.String()
-	if !strings.Contains(out, "ok 1 - git version") {
-		t.Errorf("expected ok test point, got:\n%s", out)
-	}
-}
-
-func TestEmitGitGenericFailure(t *testing.T) {
-	var buf bytes.Buffer
-	tw := NewColorWriter(&buf, false)
-
-	emitGitGeneric(tw, []string{"checkout", "nonexistent"}, []string{"error: pathspec 'nonexistent' did not match"}, 1)
-	tw.Plan()
-
-	out := buf.String()
-	if !strings.Contains(out, "not ok 1 - git checkout nonexistent") {
-		t.Errorf("expected not ok test point, got:\n%s", out)
-	}
-	if !strings.Contains(out, "exit-code: 1") {
-		t.Errorf("expected exit-code diagnostic, got:\n%s", out)
-	}
-}
-
-func TestConvertGitGenericSuccess(t *testing.T) {
+func TestConvertGitPassthroughSuccess(t *testing.T) {
 	var buf bytes.Buffer
 	exitCode := ConvertGit(
 		context.Background(), os.Args[0], []string{"version"},
-		&buf, false, false,
+		&buf, os.Stdin, os.Stderr, false, false,
 	)
 
 	if exitCode != 0 {
@@ -342,22 +313,20 @@ func TestConvertGitGenericSuccess(t *testing.T) {
 	}
 
 	out := buf.String()
-	if !strings.Contains(out, "CRAP-2") {
-		t.Errorf("expected CRAP version header, got:\n%s", out)
+	if strings.Contains(out, "CRAP-2") {
+		t.Errorf("passthrough should not contain CRAP-2 header, got:\n%s", out)
 	}
-	if !strings.Contains(out, "ok 1 - git version") {
-		t.Errorf("expected ok test point, got:\n%s", out)
-	}
-	if !strings.Contains(out, "1::1") {
-		t.Errorf("expected plan 1::1, got:\n%s", out)
+	if !strings.Contains(out, "git version") {
+		t.Errorf("expected raw git version output, got:\n%s", out)
 	}
 }
 
-func TestConvertGitGenericFailure(t *testing.T) {
+func TestConvertGitPassthroughFailure(t *testing.T) {
 	var buf bytes.Buffer
+	var stderrBuf bytes.Buffer
 	exitCode := ConvertGit(
-		context.Background(), os.Args[0], []string{"clone", "--bad-flag-that-does-not-exist"},
-		&buf, false, false,
+		context.Background(), os.Args[0], []string{"status", "--bad-flag-that-does-not-exist"},
+		&buf, os.Stdin, &stderrBuf, false, false,
 	)
 
 	if exitCode == 0 {
@@ -365,8 +334,36 @@ func TestConvertGitGenericFailure(t *testing.T) {
 	}
 
 	out := buf.String()
-	if !strings.Contains(out, "not ok 1") {
-		t.Errorf("expected not ok test point, got:\n%s", out)
+	if strings.Contains(out, "CRAP-2") {
+		t.Errorf("passthrough should not contain CRAP-2 header, got:\n%s", out)
+	}
+}
+
+func TestEmitGitClonePhases(t *testing.T) {
+	var buf bytes.Buffer
+	tw := NewColorWriter(&buf, false)
+	tw.EnableTTYBuildLastLine()
+
+	lines := []string{
+		"Cloning into 'repo'...",
+		"remote: Enumerating objects: 100, done.",
+		"remote: Counting objects: 100% (100/100), done.",
+		"Receiving objects: 100% (100/100), 1.23 MiB | 5.00 MiB/s, done.",
+		"Resolving deltas: 100% (20/20), done.",
+	}
+
+	emitPhases(tw, NewGitCloneParser(), lines, 0, "git")
+	tw.Plan()
+
+	out := stripANSIAndControl(buf.String())
+	if !strings.Contains(out, "ok 1 - init") {
+		t.Errorf("expected init test point, got:\n%s", out)
+	}
+	if !strings.Contains(out, "ok 2 - receive") {
+		t.Errorf("expected receive test point, got:\n%s", out)
+	}
+	if !strings.Contains(out, "ok 3 - resolve") {
+		t.Errorf("expected resolve test point, got:\n%s", out)
 	}
 }
 

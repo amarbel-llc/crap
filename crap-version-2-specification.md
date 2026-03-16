@@ -29,6 +29,13 @@ _should_, _should not_, _recommended_, _may_, and _optional_ in this
 document are to be interpreted as described in [RFC
 2119](https://datatracker.ietf.org/doc/html/rfc2119).
 
+### Why `::` (large-colon)
+
+The reference implementation CLI is called `large-colon` and invoked as
+`::`. The name is a deliberate contrast with `:`, the POSIX "null
+utility" (also known as "small-colon"), which accepts any arguments and
+produces no output. CRAP only comes out of the large-colon.
+
 ## Changes From TAP13 Format
 
 CRAP-2 is a fork of TAP14, which is largely backwards compatible with

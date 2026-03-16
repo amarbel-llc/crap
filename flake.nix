@@ -72,15 +72,15 @@
           };
         };
 
-        crap-git = pkgs.buildGoModule {
-          pname = "crap-git";
+        crappy-git = pkgs.buildGoModule {
+          pname = "crappy-git";
           version = "0.1.0";
           src = ./go-crap;
-          subPackages = [ "cmd/crap-git" ];
+          subPackages = [ "cmd/crappy-git" ];
           vendorHash = "sha256-5Pb0w+3v+R9ciPQ4H0HyFZlIJPOGjFFURDwLl2JvLjs=";
 
           postInstall = ''
-            mv $out/bin/crap-git "$out/bin/::git"
+            mv $out/bin/crappy-git "$out/bin/::git"
           '';
 
           meta = {
@@ -110,10 +110,10 @@
             name = "crap";
             paths = [
               large-colon
-              crap-git
+              crappy-git
             ];
           };
-          inherit large-colon crap-git rust-crap;
+          inherit large-colon crappy-git rust-crap;
         };
 
         devShells.default = pkgs.mkShell {

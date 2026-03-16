@@ -1,0 +1,10 @@
+TAP version 14
+# Cloning into 'repo'...
+# remote: Enumerating objects: 100, done.
+ok 1 - init
+# remote: Counting objects: 100% (100/100), done.
+# Receiving objects: 100% (100/100), 1.23 MiB | 5.00 MiB/s, done.
+# Resolving deltas: 100% (20/20), done.
+ok 2 - receive
+ok 3 - resolve
+1..3

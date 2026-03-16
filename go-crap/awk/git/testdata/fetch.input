@@ -1,0 +1,6 @@
+remote: Enumerating objects: 5, done.
+remote: Counting objects: 100% (5/5), done.
+Receiving objects: 100% (3/3), done.
+Resolving deltas: 100% (2/2), done.
+From github.com:org/repo
+   abc1234..def5678  main       -> origin/main

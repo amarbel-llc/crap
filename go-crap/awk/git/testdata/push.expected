@@ -1,0 +1,13 @@
+TAP version 14
+# Enumerating objects: 5, done.
+# Counting objects: 100% (5/5), done.
+# Delta compression using up to 10 threads
+# Compressing objects: 100% (3/3), done.
+# Writing objects: 100% (3/3), 1.23 KiB | 1.23 MiB/s, done.
+# Total 3 (delta 2), reused 0 (delta 0), pack-reused 0
+ok 1 - pack
+# To github.com:org/repo.git
+#    abc1234..def5678  main -> main
+ok 2 - transfer
+ok 3 - summary
+1..3

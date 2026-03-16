@@ -1,0 +1,15 @@
+TAP version 14
+# remote: Enumerating objects: 5, done.
+# remote: Counting objects: 100% (5/5), done.
+# Receiving objects: 100% (3/3), done.
+# Resolving deltas: 100% (2/2), done.
+# Unpacking objects: 100% (3/3), done.
+ok 1 - fetch
+# Updating abc1234..def5678
+ok 2 - unpack
+# Fast-forward
+#  file.go | 3 +++
+ok 3 - merge
+#  1 file changed, 3 insertions(+)
+ok 4 - summary
+1..4

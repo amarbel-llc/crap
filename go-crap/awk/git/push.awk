@@ -8,13 +8,13 @@ BEGIN {
 function classify(line,    trimmed) {
     trimmed = line
     sub(/^[[:space:]]+/, "", trimmed)
-    if (trimmed ~ /^Created autostash:/ || trimmed == "Applied autostash." || trimmed ~ /^Dropped refs\/stash/) {
-        return "stash"
+    if (trimmed ~ /^Enumerating objects:/ || trimmed ~ /^Counting objects:/ || trimmed ~ /^Delta compression/ || trimmed ~ /^Compressing objects:/ || trimmed ~ /^Writing objects:/) {
+        return "pack"
     }
-    if (trimmed ~ /^Current branch / || trimmed ~ /^Updating / || trimmed == "Fast-forward" || trimmed ~ /^Successfully rebased/ || trimmed ~ /^Applying: / || trimmed ~ /^Rebasing \(/ || trimmed ~ /^CONFLICT / || trimmed ~ /^Auto-merging / || trimmed == "Already up to date.") {
-        return "rebase"
+    if (trimmed ~ /^Total / || trimmed ~ /^To /) {
+        return "transfer"
     }
-    if ((line ~ /^ / && trimmed ~ /.+\|/) || trimmed ~ /files? changed/ || trimmed ~ /insertion/ || trimmed ~ /deletion/) {
+    if ((line ~ /^ / && trimmed ~ /->/) || trimmed ~ /\[new branch\]/ || trimmed ~ /\[new tag\]/) {
         return "summary"
     }
     return ""

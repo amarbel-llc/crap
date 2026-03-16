@@ -36,6 +36,27 @@ update: update-nix
 update-nix:
     nix flake update
 
+test-awk:
+    #!/usr/bin/env sh
+    set -e
+    fail=0
+    for expected in go-crap/awk/*/testdata/*.expected; do
+        input="${expected%.expected}.input"
+        dir="$(dirname "$(dirname "$expected")")"
+        name="$(basename "${expected%.expected}")"
+        script="$dir/$name.awk"
+        if [ ! -f "$script" ] || [ ! -f "$input" ]; then
+            continue
+        fi
+        if ! awk -f "$script" < "$input" | diff -u - "$expected"; then
+            echo "FAIL: $script"
+            fail=1
+        else
+            echo "ok: $script"
+        fi
+    done
+    exit $fail
+
 capture *ARGS:
     mkdir -p captures
     script -q captures/stdout.txt sh -c '{{ARGS}}' 2>captures/stderr.txt

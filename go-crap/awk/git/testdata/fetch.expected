@@ -1,0 +1,11 @@
+TAP version 14
+# remote: Enumerating objects: 5, done.
+# remote: Counting objects: 100% (5/5), done.
+# Receiving objects: 100% (3/3), done.
+ok 1 - negotiate
+# Resolving deltas: 100% (2/2), done.
+ok 2 - receive
+# From github.com:org/repo
+#    abc1234..def5678  main       -> origin/main
+ok 3 - resolve
+1..3

@@ -1,0 +1,7 @@
+TAP version 14
+# Created autostash: e55899e
+# Current branch lucid-aspen is up to date.
+ok 1 - stash
+# Applied autostash.
+ok 2 - rebase
+1..2

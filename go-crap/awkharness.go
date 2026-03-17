@@ -6,11 +6,13 @@ import (
 	"embed"
 	"fmt"
 	"io"
-	"os"
 	"os/exec"
 	"strings"
 	"sync"
 	"syscall"
+
+	"github.com/benhoyt/goawk/interp"
+	"github.com/benhoyt/goawk/parser"
 )
 
 //go:embed awk/git/*.awk
@@ -85,8 +87,8 @@ func convertTAPToCRAP(r io.Reader, w io.Writer, color bool) {
 	}
 }
 
-// convertWithAwk is the full streaming harness for TAP→CRAP-2 conversion.
-// It pipes the command's output through awk, reads TAP, and emits CRAP-2 with
+// convertWithAwk runs a command, pipes its output through an embedded awk
+// script using goawk, reads the resulting TAP, and emits CRAP-2 with
 // spinner and status line support.
 func convertWithAwk(ctx context.Context, binPath string, args []string, w io.Writer, awkScript string, color bool, toolName string) int {
 	tw := NewColorWriter(w, color)
@@ -95,27 +97,12 @@ func convertWithAwk(ctx context.Context, binPath string, args []string, w io.Wri
 	}
 	spinner := newStatusSpinner()
 
-	// Check for awk in PATH
-	awkPath, err := exec.LookPath("awk")
+	// Parse the awk script
+	prog, err := parser.ParseProgram([]byte(awkScript), nil)
 	if err != nil {
-		tw.BailOut("awk not found in PATH")
+		tw.BailOut(fmt.Sprintf("failed to parse awk script: %v", err))
 		return 1
 	}
-
-	// Write awk script to temp file
-	tmpFile, err := os.CreateTemp("", "crap-awk-*.awk")
-	if err != nil {
-		tw.BailOut(fmt.Sprintf("failed to create temp file: %v", err))
-		return 1
-	}
-	defer os.Remove(tmpFile.Name())
-
-	if _, err := tmpFile.WriteString(awkScript); err != nil {
-		tw.BailOut(fmt.Sprintf("failed to write awk script: %v", err))
-		tmpFile.Close()
-		return 1
-	}
-	tmpFile.Close()
 
 	// Start the real command
 	cmd := exec.CommandContext(ctx, binPath, args...)
@@ -130,45 +117,38 @@ func convertWithAwk(ctx context.Context, binPath string, args []string, w io.Wri
 		return 1
 	}
 
-	// Start awk process
-	awkCmd := exec.CommandContext(ctx, awkPath, "-f", tmpFile.Name())
-	awkStdin, err := awkCmd.StdinPipe()
-	if err != nil {
-		tw.BailOut(fmt.Sprintf("failed to create awk stdin pipe: %v", err))
-		return 1
-	}
-	awkStdout, err := awkCmd.StdoutPipe()
-	if err != nil {
-		tw.BailOut(fmt.Sprintf("failed to create awk stdout pipe: %v", err))
-		return 1
-	}
-
 	if err := cmd.Start(); err != nil {
 		tw.BailOut(fmt.Sprintf("failed to start %s: %v", toolName, err))
 		return 1
 	}
 
-	if err := awkCmd.Start(); err != nil {
-		tw.BailOut(fmt.Sprintf("failed to start awk: %v", err))
-		return 1
-	}
+	// Pipe: command stdout+stderr → goawk stdin → goawk stdout (TAP) → scanner
+	awkIn, awkInWriter := io.Pipe()
+	awkOut, awkOutWriter := io.Pipe()
 
-	// Merge cmd's stdout and stderr into awk's stdin
-	var wg sync.WaitGroup
-	wg.Add(2)
+	// Merge command stdout+stderr into awk input pipe
+	var mergeWg sync.WaitGroup
+	mergeWg.Add(2)
 	go func() {
-		defer wg.Done()
-		io.Copy(awkStdin, cmdStdout)
+		defer mergeWg.Done()
+		io.Copy(awkInWriter, cmdStdout)
 	}()
 	go func() {
-		defer wg.Done()
-		io.Copy(awkStdin, cmdStderr)
+		defer mergeWg.Done()
+		io.Copy(awkInWriter, cmdStderr)
+	}()
+	go func() {
+		mergeWg.Wait()
+		awkInWriter.Close()
 	}()
 
-	// Close awk stdin when both pipes are done
+	// Run goawk in a goroutine
 	go func() {
-		wg.Wait()
-		awkStdin.Close()
+		interp.ExecProgram(prog, &interp.Config{
+			Stdin:  awkIn,
+			Output: awkOutWriter,
+		})
+		awkOutWriter.Close()
 	}()
 
 	// Start status ticker
@@ -176,8 +156,8 @@ func convertWithAwk(ctx context.Context, binPath string, args []string, w io.Wri
 	var lastContent string
 	stopTicker := startStatusTicker(tw, spinner, &mu, &lastContent)
 
-	// Read TAP lines from awk's stdout
-	scanner := bufio.NewScanner(awkStdout)
+	// Read TAP lines from goawk's output
+	scanner := bufio.NewScanner(awkOut)
 	hasTestPoints := false
 
 	for scanner.Scan() {
@@ -238,9 +218,8 @@ func convertWithAwk(ctx context.Context, binPath string, args []string, w io.Wri
 	stopTicker()
 	tw.FinishLastLine()
 
-	// Wait for both commands
+	// Wait for command to finish
 	cmdErr := cmd.Wait()
-	awkCmd.Wait()
 
 	// Extract exit code from cmd
 	exitCode := 0

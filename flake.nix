@@ -57,7 +57,7 @@
           version = "0.1.0";
           src = ./go-crap;
           subPackages = [ "cmd/large-colon" ];
-          vendorHash = "sha256-5Pb0w+3v+R9ciPQ4H0HyFZlIJPOGjFFURDwLl2JvLjs=";
+          vendorHash = "sha256-ztSE16aRXgGfAx4iou+BQ7dVCL2dk2c33JAcQxqce5c=";
 
           nativeCheckInputs = [ pkgs.git ];
 
@@ -77,7 +77,7 @@
           version = "0.1.0";
           src = ./go-crap;
           subPackages = [ "cmd/crappy-git" ];
-          vendorHash = "sha256-5Pb0w+3v+R9ciPQ4H0HyFZlIJPOGjFFURDwLl2JvLjs=";
+          vendorHash = "sha256-ztSE16aRXgGfAx4iou+BQ7dVCL2dk2c33JAcQxqce5c=";
 
           postInstall = ''
             mv $out/bin/crappy-git "$out/bin/::git"
@@ -95,7 +95,7 @@
           version = "0.1.0";
           src = ./go-crap;
           subPackages = [ "cmd/crappy-brew" ];
-          vendorHash = "sha256-5Pb0w+3v+R9ciPQ4H0HyFZlIJPOGjFFURDwLl2JvLjs=";
+          vendorHash = "sha256-ztSE16aRXgGfAx4iou+BQ7dVCL2dk2c33JAcQxqce5c=";
 
           postInstall = ''
             mv $out/bin/crappy-brew "$out/bin/::brew"

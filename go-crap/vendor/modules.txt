@@ -1,0 +1,22 @@
+# github.com/benhoyt/goawk v1.31.0
+## explicit; go 1.20
+github.com/benhoyt/goawk/internal/ast
+github.com/benhoyt/goawk/internal/compiler
+github.com/benhoyt/goawk/internal/resolver
+github.com/benhoyt/goawk/interp
+github.com/benhoyt/goawk/lexer
+github.com/benhoyt/goawk/parser
+# golang.org/x/text v0.34.0
+## explicit; go 1.24.0
+golang.org/x/text/feature/plural
+golang.org/x/text/internal
+golang.org/x/text/internal/catmsg
+golang.org/x/text/internal/format
+golang.org/x/text/internal/language
+golang.org/x/text/internal/language/compact
+golang.org/x/text/internal/number
+golang.org/x/text/internal/stringset
+golang.org/x/text/internal/tag
+golang.org/x/text/language
+golang.org/x/text/message
+golang.org/x/text/message/catalog

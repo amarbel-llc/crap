@@ -1,0 +1,6 @@
+==> Upgrading foo
+==> Downloading https://example.com/foo-1.1.tar.gz
+==> Pouring foo-1.1.arm64_sonoma.bottle.tar.gz
+==> Upgrading bar
+==> Downloading https://example.com/bar-2.1.tar.gz
+==> Pouring bar-2.1.arm64_sonoma.bottle.tar.gz

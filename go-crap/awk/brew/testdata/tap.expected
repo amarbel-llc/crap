@@ -1,0 +1,8 @@
+TAP version 14
+# ==> Tapping homebrew/cask
+# Cloning into '/opt/homebrew/Library/Taps/homebrew/homebrew-cask'...
+# remote: Enumerating objects: 100, done.
+# ==> Tapped 1 command and 4000 casks (4,123 files, 300MB).
+ok 1 - clone
+ok 2 - install
+1..2

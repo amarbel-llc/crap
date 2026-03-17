@@ -1,0 +1,8 @@
+TAP version 14
+# ==> Fetching newest version of Homebrew...
+# remote: Enumerating objects: 100, done.
+# ==> Updated 2 taps (homebrew/core and homebrew/cask).
+ok 1 - fetch
+# ==> New Formulae
+ok 2 - update
+1..2

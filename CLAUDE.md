@@ -72,3 +72,4 @@ DevShell combines Go, Rust, and shell devenvs.
 - Subtests are indented 4 spaces; YAML diagnostics 2 spaces relative to their
   test point
 - GPG signing is required for commits
+- `TODO.md` is a symlink to `TODOODOO.md` — yes, this is hilarious

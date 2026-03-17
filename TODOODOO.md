@@ -6,3 +6,4 @@
 - [ ] use `1::4`-style test plan
 - [ ] brainstorm replacements for "test plan", "subtest", "test point", "bail
   out"
+- [ ] embed awk directly into go via goawk: https://github.com/benhoyt/goawk

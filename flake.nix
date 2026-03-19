@@ -108,6 +108,24 @@
           };
         };
 
+        crappy-direnv = pkgs.buildGoModule {
+          pname = "crappy-direnv";
+          version = "0.1.0";
+          src = ./go-crap;
+          subPackages = [ "cmd/crappy-direnv" ];
+          vendorHash = null;
+
+          postInstall = ''
+            mv $out/bin/crappy-direnv "$out/bin/::direnv"
+          '';
+
+          meta = {
+            description = "Direnv wrapper that emits CRAP-2 output";
+            homepage = "https://github.com/amarbel-llc/crap";
+            license = pkgs.lib.licenses.mit;
+          };
+        };
+
         rust-crap = pkgs.rustPlatform.buildRustPackage {
           pname = "rust-crap";
           version = "0.1.0";
@@ -130,12 +148,14 @@
               large-colon
               crappy-git
               crappy-brew
+              crappy-direnv
             ];
           };
           inherit
             large-colon
             crappy-git
             crappy-brew
+            crappy-direnv
             rust-crap
             ;
         };

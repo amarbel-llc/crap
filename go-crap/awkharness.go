@@ -21,6 +21,9 @@ var gitAwkScripts embed.FS
 //go:embed awk/brew/*.awk
 var brewAwkScripts embed.FS
 
+//go:embed awk/direnv/*.awk
+var direnvAwkScripts embed.FS
+
 // lookupAwkScript reads an embedded awk script for a tool and subcommand.
 func lookupAwkScript(tool, subcommand string) (string, error) {
 	var fs embed.FS
@@ -29,6 +32,8 @@ func lookupAwkScript(tool, subcommand string) (string, error) {
 		fs = gitAwkScripts
 	case "brew":
 		fs = brewAwkScripts
+	case "direnv":
+		fs = direnvAwkScripts
 	default:
 		return "", fmt.Errorf("unknown tool: %s", tool)
 	}

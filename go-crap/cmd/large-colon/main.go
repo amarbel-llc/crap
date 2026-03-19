@@ -20,8 +20,8 @@ func main() {
 	defer cancel()
 
 	if len(os.Args) < 2 {
-		printUsage()
-		os.Exit(1)
+		crap.ReformatTAP(os.Stdin, os.Stdout, stdoutIsTerminal())
+		return
 	}
 
 	var err error
@@ -41,9 +41,13 @@ func main() {
 	case "help", "-h", "--help":
 		printUsage()
 	default:
-		fmt.Fprintf(os.Stderr, "unknown command: %s\n", os.Args[1])
-		printUsage()
-		os.Exit(1)
+		command := os.Args[1]
+		args := os.Args[2:]
+		color := stdoutIsTerminal()
+		exitCode := crap.RunWithPTYReformat(ctx, command, args, os.Stdout, color)
+		if exitCode != 0 {
+			os.Exit(exitCode)
+		}
 	}
 
 	if err != nil {
@@ -53,16 +57,16 @@ func main() {
 }
 
 func printUsage() {
-	fmt.Fprintf(os.Stderr, ":: — CRAP-2 validator and writer toolkit\n\n")
+	fmt.Fprintf(os.Stderr, ":: — CRAP-2 toolkit\n\n")
 	fmt.Fprintf(os.Stderr, "Usage:\n")
-	fmt.Fprintf(os.Stderr, "  :: [command] [flags]\n\n")
-	fmt.Fprintf(os.Stderr, "Commands:\n")
-	fmt.Fprintf(os.Stderr, "  validate              Validate CRAP-2 input\n")
-	fmt.Fprintf(os.Stderr, "  go-test [args...]     Run go test and convert output to CRAP-2\n")
-	fmt.Fprintf(os.Stderr, "  cargo-test [args...]  Run cargo test and convert output to CRAP-2\n")
-	fmt.Fprintf(os.Stderr, "  reformat              Read CRAP from stdin and emit CRAP-2 with ANSI colors\n")
-	fmt.Fprintf(os.Stderr, "  exec <cmd> [args...]  Run cmd for each arg sequentially and emit CRAP-2\n")
-	fmt.Fprintf(os.Stderr, "  exec-parallel         Run commands in parallel and emit CRAP-2\n")
+	fmt.Fprintf(os.Stderr, "  ::                        Read CRAP from stdin and emit CRAP-2\n")
+	fmt.Fprintf(os.Stderr, "  :: <cmd> [args...]         Run cmd in a PTY and reformat as CRAP-2\n")
+	fmt.Fprintf(os.Stderr, "  :: reformat               Read CRAP from stdin and emit CRAP-2\n")
+	fmt.Fprintf(os.Stderr, "  :: validate [flags]       Validate CRAP-2 input\n")
+	fmt.Fprintf(os.Stderr, "  :: go-test [args...]      Run go test and convert to CRAP-2\n")
+	fmt.Fprintf(os.Stderr, "  :: cargo-test [args...]   Run cargo test and convert to CRAP-2\n")
+	fmt.Fprintf(os.Stderr, "  :: exec <cmd> [args...]   Run cmd sequentially and emit CRAP-2\n")
+	fmt.Fprintf(os.Stderr, "  :: exec-parallel          Run commands in parallel and emit CRAP-2\n")
 }
 
 func stdoutIsTerminal() bool {

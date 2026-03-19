@@ -157,6 +157,23 @@ child subtests. In practice, only the outermost document is likely to
 use this feature, since only one trailing line can occupy the terminal's
 last row.
 
+### Synchronized Output
+
+To prevent visible cursor flicker when updating the status line,
+producers SHOULD wrap cursor movement sequences in DEC private mode
+2026 (Synchronized Output):
+
+1. Emit `ESC [?2026h` to begin a synchronized update.
+2. Perform cursor-up (`ESC [A`), line clearing (`ESC [2K`), and
+   rewriting.
+3. Emit `ESC [?2026l` to end the synchronized update.
+
+Terminals that support synchronized output render all enclosed
+drawing operations as a single atomic visual update, eliminating the
+momentary blank line between clearing and rewriting. Terminals that
+do not support it silently ignore the sequences, so producers MAY
+emit them unconditionally when TTY output is active.
+
 ### Backwards Compatibility
 
 The trailing line is a valid CRAP comment and will be treated as such

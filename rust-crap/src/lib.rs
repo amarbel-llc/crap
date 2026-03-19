@@ -122,6 +122,10 @@ impl<'a> CrapWriterBuilder<'a> {
             plan_emitted: false,
             status_line_active: false,
             status_processor: None,
+            in_progress_active: false,
+            in_progress_frame: 0,
+            in_progress_desc: String::new(),
+            in_progress_num: String::new(),
             config,
         })
     }
@@ -135,6 +139,10 @@ impl<'a> CrapWriterBuilder<'a> {
             plan_emitted: false,
             status_line_active: false,
             status_processor: None,
+            in_progress_active: false,
+            in_progress_frame: 0,
+            in_progress_desc: String::new(),
+            in_progress_num: String::new(),
             config,
         })
     }
@@ -257,6 +265,10 @@ pub struct CrapWriter<'a> {
     plan_emitted: bool,
     status_line_active: bool,
     status_processor: Option<StatusLineProcessor>,
+    in_progress_active: bool,
+    in_progress_frame: usize,
+    in_progress_desc: String,
+    in_progress_num: String,
     pub(crate) config: CrapConfig,
 }
 
@@ -399,6 +411,68 @@ impl<'a> CrapWriter<'a> {
         }
     }
 
+    pub fn start_test_point(&mut self, desc: &str) -> io::Result<()> {
+        if !self.config.color {
+            return Ok(());
+        }
+        if self.status_line_active {
+            self.finish_last_line()?;
+        }
+        self.counter += 1;
+        self.in_progress_num = self.config.format_number(self.counter);
+        self.in_progress_desc = desc.to_string();
+        self.in_progress_frame = 0;
+        self.in_progress_active = true;
+        let frame = SPINNER_FRAMES[self.in_progress_frame];
+        write!(
+            self.w,
+            "\x1b[?2026h\x1b[33m{}\x1b[0m {} - {}\n\x1b[?2026l",
+            frame, self.in_progress_num, self.in_progress_desc
+        )?;
+        self.w.flush()
+    }
+
+    pub fn update_in_progress(&mut self) -> io::Result<()> {
+        if !self.in_progress_active || !self.config.color {
+            return Ok(());
+        }
+        self.in_progress_frame = (self.in_progress_frame + 1) % SPINNER_FRAMES.len();
+        let frame = SPINNER_FRAMES[self.in_progress_frame];
+        let lines_up = if self.status_line_active { 2 } else { 1 };
+        let up: String = "\x1b[A".repeat(lines_up);
+        let down: String = "\x1b[B".repeat(lines_up - 1);
+        write!(
+            self.w,
+            "\x1b[?2026h{}\r\x1b[2K\x1b[33m{}\x1b[0m {} - {}\n{}\x1b[?2026l",
+            up, frame, self.in_progress_num, self.in_progress_desc, down
+        )?;
+        self.w.flush()
+    }
+
+    pub fn finish_in_progress(&mut self, ok: bool) -> io::Result<()> {
+        if !self.in_progress_active {
+            return Ok(());
+        }
+        self.in_progress_active = false;
+        if !ok {
+            self.failed = true;
+        }
+        let status = if ok {
+            status_ok(self.config.color())
+        } else {
+            status_not_ok(self.config.color())
+        };
+        let lines_up = if self.status_line_active { 2 } else { 1 };
+        let up: String = "\x1b[A".repeat(lines_up);
+        let down: String = "\x1b[B".repeat(lines_up - 1);
+        write!(
+            self.w,
+            "\x1b[?2026h{}\r\x1b[2K{} {} - {}\n{}\x1b[?2026l",
+            up, status, self.in_progress_num, self.in_progress_desc, down
+        )?;
+        self.w.flush()
+    }
+
     pub fn update_last_line(&mut self, text: &str) -> io::Result<()> {
         let up = if self.status_line_active {
             "\x1b[A"
@@ -523,6 +597,10 @@ impl<'a> CrapWriter<'a> {
             plan_emitted: false,
             status_line_active: false,
             status_processor: None,
+            in_progress_active: false,
+            in_progress_frame: 0,
+            in_progress_desc: String::new(),
+            in_progress_num: String::new(),
             config,
         };
         if let Some(ref locale) = child.config.locale {
@@ -780,6 +858,8 @@ pub fn write_plan_locale(
     let formatted = fmt.format(&decimal);
     writeln!(w, "1::{formatted}")
 }
+
+const SPINNER_FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
 const MONKEY_FRAMES: &[&str] = &["🙈", "🙉", "🙊"];
 const SPINNER_MIN_DUR: Duration = Duration::from_millis(333); // 3fps cap
@@ -2645,5 +2725,115 @@ mod tests {
         let p = s.formatted_prefix();
         assert!(!p.contains("💤"), "unexpected 💤 in prefix: {p}");
         assert!(p.ends_with(' '), "prefix should end with space: {p:?}");
+    }
+
+    // --- In-progress test point tests ---
+
+    #[test]
+    fn start_test_point_emits_spinner() {
+        let mut buf = Vec::new();
+        let mut tw = CrapWriterBuilder::new(&mut buf)
+            .color(true)
+            .status_line(true)
+            .build()
+            .unwrap();
+        tw.start_test_point("compiling").unwrap();
+        let out = String::from_utf8(buf).unwrap();
+        assert!(
+            out.contains("\x1b[33m⠋\x1b[0m 1 - compiling\n"),
+            "expected spinner line, got:\n{out}"
+        );
+        assert!(
+            out.contains("\x1b[?2026h"),
+            "expected sync start marker, got:\n{out}"
+        );
+        assert!(
+            out.contains("\x1b[?2026l"),
+            "expected sync end marker, got:\n{out}"
+        );
+    }
+
+    #[test]
+    fn start_test_point_noop_without_color() {
+        let mut buf = Vec::new();
+        let mut tw = CrapWriterBuilder::new(&mut buf)
+            .color(false)
+            .build()
+            .unwrap();
+        tw.start_test_point("compiling").unwrap();
+        let out = String::from_utf8(buf).unwrap();
+        assert_eq!(out, "CRAP-2\n", "expected only version header, got:\n{out}");
+    }
+
+    #[test]
+    fn finish_in_progress_ok() {
+        let mut buf = Vec::new();
+        let mut tw = CrapWriterBuilder::new(&mut buf)
+            .color(true)
+            .build()
+            .unwrap();
+        tw.start_test_point("compiling").unwrap();
+        tw.finish_in_progress(true).unwrap();
+        let out = String::from_utf8(buf).unwrap();
+        assert!(
+            out.contains("\x1b[32mok\x1b[0m 1 - compiling"),
+            "expected ok rewrite, got:\n{out}"
+        );
+    }
+
+    #[test]
+    fn finish_in_progress_not_ok() {
+        let mut buf = Vec::new();
+        let has_failures;
+        {
+            let mut tw = CrapWriterBuilder::new(&mut buf)
+                .color(true)
+                .build()
+                .unwrap();
+            tw.start_test_point("compiling").unwrap();
+            tw.finish_in_progress(false).unwrap();
+            has_failures = tw.has_failures();
+        }
+        let out = String::from_utf8(buf).unwrap();
+        assert!(
+            out.contains("\x1b[31mnot ok\x1b[0m 1 - compiling"),
+            "expected not ok rewrite, got:\n{out}"
+        );
+        assert!(has_failures);
+    }
+
+    #[test]
+    fn update_in_progress_advances_frame() {
+        let mut buf = Vec::new();
+        let mut tw = CrapWriterBuilder::new(&mut buf)
+            .color(true)
+            .build()
+            .unwrap();
+        tw.start_test_point("compiling").unwrap();
+        tw.update_in_progress().unwrap();
+        let out = String::from_utf8(buf).unwrap();
+        assert!(
+            out.contains("\x1b[33m⠙\x1b[0m 1 - compiling"),
+            "expected second spinner frame, got:\n{out}"
+        );
+    }
+
+    #[test]
+    fn in_progress_with_status_line() {
+        let mut buf = Vec::new();
+        let mut tw = CrapWriterBuilder::new(&mut buf)
+            .color(true)
+            .status_line(true)
+            .build()
+            .unwrap();
+        tw.start_test_point("compiling").unwrap();
+        tw.update_last_line("building...").unwrap();
+        tw.update_in_progress().unwrap();
+        let out = String::from_utf8(buf).unwrap();
+        // With status line active, update_in_progress should move up 2 lines
+        assert!(
+            out.contains("\x1b[A\x1b[A\r\x1b[2K"),
+            "expected double cursor-up for status line, got:\n{out}"
+        );
     }
 }

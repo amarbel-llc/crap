@@ -732,7 +732,7 @@ func TestLocaleWriterEmitsPragma(t *testing.T) {
 func TestLocaleWriterFormatsTestPointNumber(t *testing.T) {
 	var buf bytes.Buffer
 	tw := NewLocaleWriter(&buf, language.MustParse("en-US"))
-	for i := 0; i < 1234; i++ {
+	for range 1234 {
 		tw.Ok("test")
 	}
 	out := buf.String()
@@ -1207,6 +1207,86 @@ func TestWriterPlanSkip(t *testing.T) {
 	want := "1::0 # SKIP no tests to run\n"
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+// --- In-Progress Test Points ---
+
+func TestStartTestPointEmitsSpinner(t *testing.T) {
+	var buf bytes.Buffer
+	tw := NewColorWriter(&buf, true)
+	tw.StartTestPoint("compiling")
+	out := buf.String()
+	expected := "\033[33m⠋\033[0m 1 - compiling\n"
+	if !strings.Contains(out, expected) {
+		t.Errorf("expected spinner line %q in output, got:\n%q", expected, out)
+	}
+	if !strings.Contains(out, "\033[?2026h") {
+		t.Errorf("expected sync start marker, got:\n%q", out)
+	}
+	if !strings.Contains(out, "\033[?2026l") {
+		t.Errorf("expected sync end marker, got:\n%q", out)
+	}
+}
+
+func TestStartTestPointNoOpWithoutColor(t *testing.T) {
+	var buf bytes.Buffer
+	tw := NewWriter(&buf)
+	tw.StartTestPoint("compiling")
+	out := buf.String()
+	if out != "CRAP-2\n" {
+		t.Errorf("expected no output from StartTestPoint without color, got:\n%q", out)
+	}
+}
+
+func TestFinishInProgressOk(t *testing.T) {
+	var buf bytes.Buffer
+	tw := NewColorWriter(&buf, true)
+	tw.StartTestPoint("compiling")
+	tw.FinishInProgress(true)
+	out := buf.String()
+	if !strings.Contains(out, "\033[32mok\033[0m 1 - compiling") {
+		t.Errorf("expected colorized ok rewrite, got:\n%q", out)
+	}
+}
+
+func TestFinishInProgressNotOk(t *testing.T) {
+	var buf bytes.Buffer
+	tw := NewColorWriter(&buf, true)
+	tw.StartTestPoint("compiling")
+	tw.FinishInProgress(false)
+	out := buf.String()
+	if !strings.Contains(out, "\033[31mnot ok\033[0m 1 - compiling") {
+		t.Errorf("expected colorized not ok rewrite, got:\n%q", out)
+	}
+	if !tw.HasFailures() {
+		t.Error("expected HasFailures to be true after FinishInProgress(false)")
+	}
+}
+
+func TestUpdateInProgressAdvancesFrame(t *testing.T) {
+	var buf bytes.Buffer
+	tw := NewColorWriter(&buf, true)
+	tw.StartTestPoint("compiling")
+	tw.UpdateInProgress()
+	out := buf.String()
+	// Second frame is ⠙
+	if !strings.Contains(out, "\033[33m⠙\033[0m 1 - compiling") {
+		t.Errorf("expected second spinner frame, got:\n%q", out)
+	}
+}
+
+func TestInProgressWithStatusLine(t *testing.T) {
+	var buf bytes.Buffer
+	tw := NewColorWriter(&buf, true)
+	tw.EnableTTYBuildLastLine()
+	tw.StartTestPoint("compiling")
+	tw.UpdateLastLine("building...")
+	tw.UpdateInProgress()
+	out := buf.String()
+	// With status line active, UpdateInProgress should go up 2 lines
+	if !strings.Contains(out, "\033[A\033[A") {
+		t.Errorf("expected cursor up 2 lines for in-progress with status line, got:\n%q", out)
 	}
 }
 

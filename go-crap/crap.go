@@ -20,6 +20,15 @@ const (
 	ansiReset  = "\033[0m"
 )
 
+// Synchronized output ANSI sequences (DEC private mode 2026).
+const (
+	ansiSyncStart = "\033[?2026h"
+	ansiSyncEnd   = "\033[?2026l"
+)
+
+// spinnerFrames are braille dot characters used for in-progress test point animation.
+var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+
 type Writer struct {
 	w                 io.Writer
 	n                 int
@@ -33,6 +42,10 @@ type Writer struct {
 	ttyBuildLastLine  bool
 	statusLineActive  bool
 	statusProcessor   *StatusLineProcessor
+	inProgressActive  bool
+	inProgressFrame   int
+	inProgressDesc    string
+	inProgressNum     string
 }
 
 func NewWriter(w io.Writer) *Writer {
@@ -285,6 +298,71 @@ func (tw *Writer) clearStatusIfActive() {
 	if tw.statusLineActive {
 		tw.FinishLastLine()
 	}
+}
+
+// StartTestPoint emits an in-progress test point line with a yellow spinner
+// character. Only works when color is true (TTY mode); otherwise it is a no-op.
+// The caller must call FinishInProgress when the test completes.
+func (tw *Writer) StartTestPoint(description string) {
+	if !tw.color {
+		return
+	}
+	tw.clearStatusIfActive()
+	tw.n++
+	tw.inProgressNum = tw.formatNumber(tw.n)
+	tw.inProgressDesc = description
+	tw.inProgressFrame = 0
+	tw.inProgressActive = true
+	frame := spinnerFrames[tw.inProgressFrame]
+	fmt.Fprintf(tw.w, "%s%s%s%s %s - %s\n%s",
+		ansiSyncStart, ansiYellow, frame, ansiReset,
+		tw.inProgressNum, tw.inProgressDesc, ansiSyncEnd)
+}
+
+// UpdateInProgress advances the spinner frame on the in-progress test point
+// line. No-op if no in-progress test point is active.
+func (tw *Writer) UpdateInProgress() {
+	if !tw.inProgressActive {
+		return
+	}
+	tw.inProgressFrame = (tw.inProgressFrame + 1) % len(spinnerFrames)
+	frame := spinnerFrames[tw.inProgressFrame]
+	linesUp := 1
+	if tw.statusLineActive {
+		linesUp = 2
+	}
+	up := strings.Repeat("\033[A", linesUp)
+	down := strings.Repeat("\033[B", linesUp-1)
+	fmt.Fprintf(tw.w, "%s%s\r\033[2K%s%s%s %s - %s\n%s%s",
+		ansiSyncStart, up, ansiYellow, frame, ansiReset,
+		tw.inProgressNum, tw.inProgressDesc, down, ansiSyncEnd)
+}
+
+// FinishInProgress rewrites the in-progress test point line with the final
+// ok/not ok status. No-op if no in-progress test point is active.
+// The test number was already claimed in StartTestPoint, so this does not
+// increment the counter.
+func (tw *Writer) FinishInProgress(ok bool) {
+	if !tw.inProgressActive {
+		return
+	}
+	tw.inProgressActive = false
+	if !ok {
+		tw.failed = true
+	}
+	status := tw.colorOk()
+	if !ok {
+		status = tw.colorNotOk()
+	}
+	linesUp := 1
+	if tw.statusLineActive {
+		linesUp = 2
+	}
+	up := strings.Repeat("\033[A", linesUp)
+	down := strings.Repeat("\033[B", linesUp-1)
+	fmt.Fprintf(tw.w, "%s%s\r\033[2K%s %s - %s\n%s%s",
+		ansiSyncStart, up, status,
+		tw.inProgressNum, tw.inProgressDesc, down, ansiSyncEnd)
 }
 
 type Diagnostics struct {

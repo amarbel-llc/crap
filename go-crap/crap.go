@@ -26,8 +26,11 @@ const (
 	ansiSyncEnd   = "\033[?2026l"
 )
 
-// spinnerFrames are braille dot characters used for in-progress test point animation.
-var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+// spinnerFrames are two-character braille patterns where a dot travels clockwise
+// around the perimeter of a 2-cell-wide braille box.
+var spinnerFrames = []string{
+	"⡀⠀", "⠄⠀", "⠂⠀", "⠁⠀", "⠈⠀", "⠀⠁", "⠀⠈", "⠀⠐", "⠀⠠", "⠀⢀", "⠀⡀", "⢀⠀",
+}
 
 type Writer struct {
 	w                 io.Writer

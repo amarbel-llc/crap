@@ -184,8 +184,7 @@ func convertWithAwk(ctx context.Context, binPath string, args []string, w io.Wri
 			comment = strings.TrimSpace(comment)
 			mu.Lock()
 			lastContent = comment
-			spinner.Touch()
-			tw.UpdateLastLine(spinner.prefix() + comment)
+			tw.UpdateLastLine(comment)
 			mu.Unlock()
 			continue
 		}

@@ -235,70 +235,17 @@ func ConvertExec(ctx context.Context, utility string, args []string, w io.Writer
 	return exitCode
 }
 
-// statusSpinner cycles through frames on each call to Frame(), rate-limited
-// to maxFPS. When called faster than the limit, it returns the same frame.
-//
-// TODO: explore a timer-based spinner (goroutine advancing frames independently)
-// for smoother animation when commands produce output in bursts.
 type statusSpinner struct {
-	frames     []string
-	index      int
-	lastAdv    time.Time
-	lastUpdate time.Time
-	minDur     time.Duration
-	sleepAfter time.Duration
-	disabled   bool
+	disabled bool
 }
-
-var monkeyFrames = []string{"🙈", "🙉", "🙊"}
 
 func newStatusSpinner() *statusSpinner {
-	return &statusSpinner{
-		frames:     monkeyFrames,
-		minDur:     time.Second / 3, // 3fps cap
-		sleepAfter: 5 * time.Second,
-	}
+	return &statusSpinner{}
 }
 
-// Touch signals that new content arrived, resetting the sleep timer.
-func (s *statusSpinner) Touch() {
-	s.lastUpdate = time.Now()
-}
-
-// prefix returns the spinner frame followed by a space, or empty if disabled.
-// Advances the spinner (rate-limited). Call this when new content arrives.
-func (s *statusSpinner) prefix() string {
-	if s.disabled {
-		return ""
-	}
-	now := time.Now()
-	if now.Sub(s.lastAdv) >= s.minDur {
-		s.index = (s.index + 1) % len(s.frames)
-		s.lastAdv = now
-	}
-	return s.currentPrefix()
-}
-
-// currentPrefix returns the current spinner frame followed by a space, without
-// advancing. Call this from the ticker to re-render without progressing the
-// animation. Returns empty if disabled.
-func (s *statusSpinner) currentPrefix() string {
-	if s.disabled {
-		return ""
-	}
-	now := time.Now()
-	sleeping := !s.lastUpdate.IsZero() && now.Sub(s.lastUpdate) >= s.sleepAfter
-	frame := s.frames[s.index]
-	if sleeping {
-		frame += "💤"
-	}
-	return frame + " "
-}
-
-// startStatusTicker starts a background goroutine that re-renders the status
-// line at the spinner's frame rate. This keeps the spinner animating and
-// triggers the 💤 indicator even when no new output arrives. The caller must
-// hold mu when writing to tw or updating content. Returns a stop function.
+// startStatusTicker starts a background goroutine that advances in-progress
+// spinners and re-renders the status line at 3fps. The caller must hold mu
+// when writing to tw or updating content. Returns a stop function.
 func startStatusTicker(tw *Writer, spinner *statusSpinner, mu *sync.Mutex, content *string) func() {
 	done := make(chan struct{})
 	exited := make(chan struct{})
@@ -310,8 +257,9 @@ func startStatusTicker(tw *Writer, spinner *statusSpinner, mu *sync.Mutex, conte
 			select {
 			case <-ticker.C:
 				mu.Lock()
+				tw.UpdateInProgress()
 				if *content != "" {
-					tw.UpdateLastLine(spinner.currentPrefix() + *content)
+					tw.UpdateLastLine(*content)
 				}
 				mu.Unlock()
 			case <-done:
@@ -333,14 +281,12 @@ func runWithStatusLine(ctx context.Context, tw *Writer, spinner *statusSpinner, 
 	var mu sync.Mutex
 	var lastContent string
 
-	spinner.Touch()
 	stopTicker := startStatusTicker(tw, spinner, &mu, &lastContent)
 
 	r := runCommandStreamingLines(ctx, arg, command, func(line string) {
 		mu.Lock()
 		lastContent = line
-		spinner.Touch()
-		tw.UpdateLastLine(spinner.prefix() + line)
+		tw.UpdateLastLine(line)
 		mu.Unlock()
 	})
 
@@ -372,9 +318,8 @@ func execParallelWithRunningCount(ctx context.Context, executor *GoroutineExecut
 	var lastContent string
 
 	renderParallel := func() {
-		spinner.Touch()
 		lastContent = parallelStatusLine(executor.Running(), completed, total, color)
-		tw.UpdateLastLine(spinner.prefix() + lastContent)
+		tw.UpdateLastLine(lastContent)
 	}
 
 	stopTicker := startStatusTicker(tw, spinner, &mu, &lastContent)

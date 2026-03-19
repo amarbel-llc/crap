@@ -41,7 +41,10 @@ func RunWithPTYReformat(ctx context.Context, command string, args []string, w io
 			}
 		}
 	}()
-	defer signal.Stop(sigCh)
+	defer func() {
+		signal.Stop(sigCh)
+		close(sigCh)
+	}()
 
 	ReformatTAP(ptmx, w, color)
 

@@ -473,6 +473,61 @@ impl<'a> CrapWriter<'a> {
         self.w.flush()
     }
 
+    pub fn finish_test_point(&mut self, result: &TestResult) -> io::Result<()> {
+        if !self.in_progress_active {
+            return self.test_point(result);
+        }
+
+        self.in_progress_active = false;
+        if !result.ok {
+            self.failed = true;
+        }
+
+        let status = if result.ok {
+            status_ok(self.config.color())
+        } else {
+            status_not_ok(self.config.color())
+        };
+
+        let lines_up = if self.status_line_active { 2 } else { 1 };
+        let up: String = "\x1b[A".repeat(lines_up);
+        let down: String = "\x1b[B".repeat(lines_up - 1);
+
+        if let Some(ref directive) = result.directive {
+            write!(
+                self.w,
+                "\x1b[?2026h{}\r\x1b[2K{} {} - {} # {}\n{}\x1b[?2026l",
+                up, status, self.in_progress_num, result.name, directive, down
+            )?;
+        } else {
+            write!(
+                self.w,
+                "\x1b[?2026h{}\r\x1b[2K{} {} - {}\n{}\x1b[?2026l",
+                up, status, self.in_progress_num, result.name, down
+            )?;
+        }
+        self.w.flush()?;
+
+        if !result.suppress_yaml && has_yaml_block(result) {
+            writeln!(self.w, "  ---")?;
+            if let Some(ref message) = result.error_message {
+                write_yaml_field(&mut *self.w, "message", message, self.config.color())?;
+            }
+            if !result.ok {
+                writeln!(self.w, "  severity: fail")?;
+            }
+            if let Some(code) = result.exit_code {
+                writeln!(self.w, "  exitcode: {code}")?;
+            }
+            if let Some(ref output) = result.output {
+                write_yaml_field(&mut *self.w, "output", output, self.config.color())?;
+            }
+            writeln!(self.w, "  ...")?;
+        }
+
+        Ok(())
+    }
+
     pub fn update_last_line(&mut self, text: &str) -> io::Result<()> {
         let up = if self.status_line_active {
             "\x1b[A"
@@ -2798,6 +2853,177 @@ mod tests {
         assert!(
             out.contains("\x1b[31mnot ok\x1b[0m 1 - compiling"),
             "expected not ok rewrite, got:\n{out}"
+        );
+        assert!(has_failures);
+    }
+
+    #[test]
+    fn finish_test_point_with_yaml() {
+        let mut buf = Vec::new();
+        let mut tw = CrapWriterBuilder::new(&mut buf)
+            .color(true)
+            .build()
+            .unwrap();
+        tw.start_test_point("compiling").unwrap();
+        let result = TestResult {
+            number: 1,
+            name: "compiling".into(),
+            ok: true,
+            directive: None,
+            error_message: None,
+            exit_code: None,
+            output: Some("build output here".into()),
+            suppress_yaml: false,
+        };
+        tw.finish_test_point(&result).unwrap();
+        let out = String::from_utf8(buf).unwrap();
+        assert!(
+            out.contains("\x1b[32mok\x1b[0m 1 - compiling"),
+            "expected spinner line rewritten with ok, got:\n{out}"
+        );
+        assert!(
+            out.contains("  ---\n"),
+            "expected YAML block start, got:\n{out}"
+        );
+        assert!(
+            out.contains("  output: \"build output here\"\n"),
+            "expected output in YAML, got:\n{out}"
+        );
+        assert!(
+            out.contains("  ...\n"),
+            "expected YAML block end, got:\n{out}"
+        );
+    }
+
+    #[test]
+    fn finish_test_point_suppress_yaml() {
+        let mut buf = Vec::new();
+        let mut tw = CrapWriterBuilder::new(&mut buf)
+            .color(true)
+            .build()
+            .unwrap();
+        tw.start_test_point("compiling").unwrap();
+        let result = TestResult {
+            number: 1,
+            name: "compiling".into(),
+            ok: false,
+            directive: None,
+            error_message: Some("failed".into()),
+            exit_code: Some(1),
+            output: Some("verbose output".into()),
+            suppress_yaml: true,
+        };
+        tw.finish_test_point(&result).unwrap();
+        let out = String::from_utf8(buf).unwrap();
+        assert!(
+            out.contains("\x1b[31mnot ok\x1b[0m 1 - compiling"),
+            "expected not ok rewrite, got:\n{out}"
+        );
+        assert!(
+            !out.contains("---"),
+            "expected no YAML block when suppress_yaml is true, got:\n{out}"
+        );
+    }
+
+    #[test]
+    fn finish_test_point_without_color() {
+        let mut buf = Vec::new();
+        let mut tw = CrapWriterBuilder::new(&mut buf)
+            .color(false)
+            .build()
+            .unwrap();
+        tw.start_test_point("compiling").unwrap();
+        let result = TestResult {
+            number: 1,
+            name: "compiling".into(),
+            ok: true,
+            directive: None,
+            error_message: None,
+            exit_code: None,
+            output: Some("build log".into()),
+            suppress_yaml: false,
+        };
+        tw.finish_test_point(&result).unwrap();
+        let out = String::from_utf8(buf).unwrap();
+        assert!(
+            out.contains("ok 1 - compiling\n"),
+            "expected full test_point output, got:\n{out}"
+        );
+        assert!(
+            out.contains("  ---\n"),
+            "expected YAML block, got:\n{out}"
+        );
+        assert!(
+            out.contains("  output: \"build log\"\n"),
+            "expected output in YAML, got:\n{out}"
+        );
+    }
+
+    #[test]
+    fn finish_test_point_with_directive() {
+        let mut buf = Vec::new();
+        let mut tw = CrapWriterBuilder::new(&mut buf)
+            .color(true)
+            .build()
+            .unwrap();
+        tw.start_test_point("optional feature").unwrap();
+        let result = TestResult {
+            number: 1,
+            name: "optional feature".into(),
+            ok: true,
+            directive: Some("SKIP not supported".into()),
+            error_message: None,
+            exit_code: None,
+            output: None,
+            suppress_yaml: false,
+        };
+        tw.finish_test_point(&result).unwrap();
+        let out = String::from_utf8(buf).unwrap();
+        assert!(
+            out.contains("\x1b[32mok\x1b[0m 1 - optional feature # SKIP not supported"),
+            "expected directive in rewritten line, got:\n{out}"
+        );
+    }
+
+    #[test]
+    fn finish_test_point_not_ok_with_diagnostics() {
+        let mut buf = Vec::new();
+        let has_failures;
+        {
+            let mut tw = CrapWriterBuilder::new(&mut buf)
+                .color(true)
+                .build()
+                .unwrap();
+            tw.start_test_point("build").unwrap();
+            let result = TestResult {
+                number: 1,
+                name: "build".into(),
+                ok: false,
+                directive: None,
+                error_message: Some("compilation failed".into()),
+                exit_code: Some(2),
+                output: None,
+                suppress_yaml: false,
+            };
+            tw.finish_test_point(&result).unwrap();
+            has_failures = tw.has_failures();
+        }
+        let out = String::from_utf8(buf).unwrap();
+        assert!(
+            out.contains("\x1b[31mnot ok\x1b[0m 1 - build"),
+            "expected not ok rewrite, got:\n{out}"
+        );
+        assert!(
+            out.contains("  message: \"compilation failed\"\n"),
+            "expected error_message in YAML, got:\n{out}"
+        );
+        assert!(
+            out.contains("  severity: fail\n"),
+            "expected severity in YAML, got:\n{out}"
+        );
+        assert!(
+            out.contains("  exitcode: 2\n"),
+            "expected exitcode in YAML, got:\n{out}"
         );
         assert!(has_failures);
     }

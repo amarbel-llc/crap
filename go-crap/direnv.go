@@ -17,7 +17,7 @@ func direnvAwkScript(args []string) (string, error) {
 		return "", fmt.Errorf("no subcommand")
 	}
 	switch args[0] {
-	case "status", "hook":
+	case "allow", "status", "reload", "hook":
 		return lookupAwkScript("direnv", args[0])
 	default:
 		return "", fmt.Errorf("unrecognized: %s", args[0])

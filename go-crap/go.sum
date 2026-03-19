@@ -1,4 +1,6 @@
 github.com/benhoyt/goawk v1.31.0 h1:TSdLys1rAWvmb3befdmLYpaHZbTrYtS+JkBWRcNsMNM=
 github.com/benhoyt/goawk v1.31.0/go.mod h1:jXTQxBxtQ0VsjFqc8dw7tIJj3SDzQN8kcdMq7r83/ZA=
+github.com/creack/pty/v2 v2.0.1 h1:RDY1VY5b+7m2mfPsugucOYPIxMp+xal5ZheSyVzUA+k=
+github.com/creack/pty/v2 v2.0.1/go.mod h1:2dSssKp3b86qYEMwA/FPwc3ff+kYpDdQI8osU8J7gxQ=
 golang.org/x/text v0.34.0 h1:oL/Qq0Kdaqxa1KbNeMKwQq0reLCCaFtqu2eNuSeNHbk=
 golang.org/x/text v0.34.0/go.mod h1:homfLqTYRFyVYemLBFl5GgL/DWEiH5wcsQ5gSh1yziA=

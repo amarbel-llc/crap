@@ -400,10 +400,15 @@ impl<'a> CrapWriter<'a> {
     }
 
     pub fn update_last_line(&mut self, text: &str) -> io::Result<()> {
-        if self.config.color {
-            write!(self.w, "\r\x1b[2K\x1b[?7l# {}\x1b[?7h", text)?;
+        let up = if self.status_line_active {
+            "\x1b[A"
         } else {
-            write!(self.w, "\r\x1b[2K# {}", text)?;
+            ""
+        };
+        if self.config.color {
+            write!(self.w, "{}\r\x1b[2K\x1b[?7l# {}\x1b[?7h\n", up, text)?;
+        } else {
+            write!(self.w, "{}\r\x1b[2K# {}\n", up, text)?;
         }
         self.status_line_active = true;
         self.w.flush()
@@ -411,7 +416,7 @@ impl<'a> CrapWriter<'a> {
 
     pub fn finish_last_line(&mut self) -> io::Result<()> {
         self.status_line_active = false;
-        write!(self.w, "\r\x1b[2K")?;
+        write!(self.w, "\x1b[A\r\x1b[2K")?;
         self.w.flush()
     }
 
@@ -2362,12 +2367,8 @@ mod tests {
         tw.update_last_line("building... 1/3").unwrap();
         let out = String::from_utf8(buf).unwrap();
         assert!(
-            out.contains("\r\x1b[2K# building... 1/3"),
-            "expected cursor control + comment prefix, got:\n{out}"
-        );
-        assert!(
-            !out.ends_with('\n'),
-            "update_last_line should not emit trailing newline"
+            out.contains("\r\x1b[2K# building... 1/3\n"),
+            "expected cursor control + comment prefix + trailing newline, got:\n{out}"
         );
     }
 
@@ -2382,8 +2383,8 @@ mod tests {
         tw.finish_last_line().unwrap();
         let out = String::from_utf8(buf).unwrap();
         assert!(
-            out.ends_with("\r\x1b[2K"),
-            "finish_last_line should erase the line with CR+clear, got:\n{out}"
+            out.ends_with("\x1b[A\r\x1b[2K"),
+            "finish_last_line should move up + erase, got:\n{out}"
         );
     }
 
@@ -2398,8 +2399,8 @@ mod tests {
         tw.update_last_line("long line here").unwrap();
         let out = String::from_utf8(buf).unwrap();
         assert!(
-            out.contains("\r\x1b[2K\x1b[?7l# long line here\x1b[?7h"),
-            "expected DECAWM wrapping, got:\n{out}"
+            out.contains("\r\x1b[2K\x1b[?7l# long line here\x1b[?7h\n"),
+            "expected DECAWM wrapping with trailing newline, got:\n{out}"
         );
     }
 

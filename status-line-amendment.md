@@ -54,13 +54,18 @@ single trailing line at the end of the CRAP output that is continuously
 updated using ANSI escape sequences (cursor movement, line clearing,
 SGR color codes). This line:
 
-1. MUST always be the last line of the output at any point in time.
+1. MUST always be the last visible line of the output at any point in
+   time.
 2. MUST be prefixed with `# ` (hash, space), making it a valid CRAP
    comment.
 3. MAY contain ANSI SGR sequences for colored output.
 4. MAY be rewritten in place using ANSI cursor control sequences
-   (e.g., carriage return `\r`, `ESC [2K` to clear the line).
+   (e.g., `ESC [A` to move up, `ESC [2K` to clear the line).
 5. MUST NOT span more than one line.
+6. MUST be followed by a newline, placing the cursor on the line
+   below the status line. When the status line is updated, the
+   producer MUST move the cursor up one line (`ESC [A`) before
+   clearing and rewriting.
 
 The content after the `# ` prefix is display-only and MUST be ignored
 by readers, consistent with CRAP-2's treatment of comment lines.
@@ -76,9 +81,11 @@ Producers MAY respect the `NO_COLOR` environment variable. When
 `NO_COLOR` is set to a non-empty value, producers SHOULD suppress ANSI
 sequences in the trailing line but MAY still update it in place.
 
-When the CRAP stream is complete, the producer SHOULD emit a final
-newline after the last update to the trailing line, ensuring the
-terminal prompt appears on a clean line.
+When the CRAP stream is complete, the producer MUST clear the status
+line by moving the cursor up one line (`ESC [A`), erasing it
+(`ESC [2K`), and leaving the cursor on that now-empty line. This
+ensures the terminal prompt appears on a clean line without leftover
+status content.
 
 ### Reader Behavior
 

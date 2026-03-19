@@ -898,11 +898,8 @@ func TestUpdateLastLine(t *testing.T) {
 	tw.EnableTTYBuildLastLine()
 	tw.UpdateLastLine("building... 1/3")
 	out := buf.String()
-	if !strings.Contains(out, "\r\033[2K# building... 1/3") {
-		t.Errorf("expected cursor control + comment prefix, got:\n%s", out)
-	}
-	if strings.HasSuffix(out, "\n") {
-		t.Error("UpdateLastLine should not emit trailing newline")
+	if !strings.Contains(out, "\r\033[2K# building... 1/3\n") {
+		t.Errorf("expected cursor control + comment prefix + trailing newline, got:\n%s", out)
 	}
 }
 
@@ -913,8 +910,8 @@ func TestFinishLastLineErasesStatusLine(t *testing.T) {
 	tw.UpdateLastLine("building...")
 	tw.FinishLastLine()
 	out := buf.String()
-	if !strings.HasSuffix(out, "\r\033[2K") {
-		t.Errorf("FinishLastLine should erase the line with CR+clear, got suffix: %q", out[max(0, len(out)-20):])
+	if !strings.HasSuffix(out, "\033[A\r\033[2K") {
+		t.Errorf("FinishLastLine should move up + erase, got suffix: %q", out[max(0, len(out)-20):])
 	}
 }
 
@@ -952,8 +949,8 @@ func TestUpdateLastLineDECAWMWithColor(t *testing.T) {
 	tw.EnableTTYBuildLastLine()
 	tw.UpdateLastLine("building...")
 	out := buf.String()
-	if !strings.Contains(out, "\033[?7l# building...\033[?7h") {
-		t.Errorf("expected DECAWM wrapping in color mode, got:\n%q", out)
+	if !strings.Contains(out, "\033[?7l# building...\033[?7h\n") {
+		t.Errorf("expected DECAWM wrapping in color mode with trailing newline, got:\n%q", out)
 	}
 }
 

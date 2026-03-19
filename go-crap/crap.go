@@ -264,16 +264,20 @@ func (tw *Writer) EnableTTYBuildLastLine() {
 }
 
 func (tw *Writer) UpdateLastLine(text string) {
+	prefix := ""
+	if tw.statusLineActive {
+		prefix = "\033[A"
+	}
 	if tw.color {
-		fmt.Fprintf(tw.w, "\r\033[2K\033[?7l# %s\033[?7h", text)
+		fmt.Fprintf(tw.w, "%s\r\033[2K\033[?7l# %s\033[?7h\n", prefix, text)
 	} else {
-		fmt.Fprintf(tw.w, "\r\033[2K# %s", text)
+		fmt.Fprintf(tw.w, "%s\r\033[2K# %s\n", prefix, text)
 	}
 	tw.statusLineActive = true
 }
 
 func (tw *Writer) FinishLastLine() {
-	fmt.Fprint(tw.w, "\r\033[2K")
+	fmt.Fprint(tw.w, "\033[A\r\033[2K")
 	tw.statusLineActive = false
 }
 

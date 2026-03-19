@@ -246,16 +246,9 @@ func TestGoroutineExecutorEmptyArgs(t *testing.T) {
 	}
 }
 
-// stripANSIAndControl removes ANSI escape sequences, carriage returns, and
-// spinner emoji from output so tests can match content deterministically.
-// The spinner frame is non-deterministic (rate-limited at 3fps) so tests
-// must not assert on which emoji appears.
+// stripANSIAndControl removes ANSI escape sequences and carriage returns
+// from output so tests can match content deterministically.
 func stripANSIAndControl(s string) string {
-	// Strip spinner emoji first (before byte-level ANSI stripping)
-	for _, emoji := range []string{"🙈", "🙉", "🙊", "💤"} {
-		s = strings.ReplaceAll(s, emoji, "")
-	}
-
 	var result strings.Builder
 	i := 0
 	for i < len(s) {
@@ -300,7 +293,7 @@ func TestConvertExecParallelWithStatusSequential(t *testing.T) {
 	if !strings.Contains(clean, "ok 2 - echo world") {
 		t.Errorf("expected ok for second command, got:\n%s", clean)
 	}
-	// The status line should contain the last output line (with spinner prefix)
+	// The status line should contain the last output line
 	if !strings.Contains(clean, "hello") || !strings.Contains(out, "# ") {
 		t.Errorf("expected status line with stdout content 'hello', got:\n%s", clean)
 	}

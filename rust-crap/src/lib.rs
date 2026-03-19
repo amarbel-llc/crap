@@ -920,16 +920,14 @@ const SPINNER_FRAMES: &[&str] = &[
 
 const MONKEY_FRAMES: &[&str] = &["🙈", "🙉", "🙊"];
 const SPINNER_MIN_DUR: Duration = Duration::from_millis(333); // 3fps cap
-const SPINNER_SLEEP_AFTER: Duration = Duration::from_secs(5);
 
 /// Cycling spinner that advances on content updates, rate-limited to 3fps.
-///
-/// Appends 💤 when no [`touch`](Spinner::touch) call has occurred for 5 seconds,
-/// signaling the process is alive but idle.
 ///
 /// The spinner is a pure state machine — it does no I/O and owns no threads.
 /// Call [`prefix`](Spinner::prefix) from your content-producing code, and
 /// [`current_prefix`](Spinner::current_prefix) from a background re-render loop.
+/// Use [`constant_rate`](Spinner::constant_rate) to create a spinner that
+/// advances on every call, suitable for a ticker thread running at its own rate.
 ///
 /// # Example: background ticker with `std::thread`
 ///
@@ -949,34 +947,30 @@ const SPINNER_SLEEP_AFTER: Duration = Duration::from_secs(5);
 ///         .build()
 ///         .unwrap(),
 /// );
-/// let spinner = Mutex::new(Spinner::new());
+/// let spinner = Mutex::new(Spinner::constant_rate());
 /// let content = Mutex::new(String::new());
 /// let stop = AtomicBool::new(false);
 ///
 /// std::thread::scope(|s| {
 ///     // Ticker thread: re-renders at spinner frame rate.
-///     // Uses current_prefix() which does NOT advance the frame.
+///     // Uses prefix() which advances the frame on every call.
 ///     s.spawn(|| {
 ///         while !stop.load(Ordering::Relaxed) {
 ///             std::thread::sleep(Duration::from_millis(333));
-///             let sp = spinner.lock().unwrap();
+///             let mut sp = spinner.lock().unwrap();
 ///             let c = content.lock().unwrap();
 ///             if !c.is_empty() {
-///                 let pfx = sp.formatted_current_prefix();
-///                 let _ = tw.lock().unwrap().update_last_line(&format!("{pfx}{c}"));
+///                 let pfx = sp.prefix();
+///                 let _ = tw.lock().unwrap().update_last_line(&format!("{pfx} {c}"));
 ///             }
 ///         }
 ///     });
 ///
-///     // Worker: produces content and advances the spinner.
+///     // Worker: produces content.
 ///     for line in ["compiling...", "linking...", "done"] {
 ///         {
-///             let mut sp = spinner.lock().unwrap();
-///             sp.touch();
-///             let pfx = sp.formatted_prefix();
 ///             let mut c = content.lock().unwrap();
 ///             *c = line.to_string();
-///             let _ = tw.lock().unwrap().update_last_line(&format!("{pfx}{c}"));
 ///         }
 ///         std::thread::sleep(Duration::from_millis(500));
 ///     }
@@ -991,9 +985,7 @@ pub struct Spinner {
     frames: &'static [&'static str],
     index: usize,
     last_advance: Option<Instant>,
-    last_content: Option<Instant>,
     min_dur: Duration,
-    sleep_after: Duration,
     disabled: bool,
 }
 
@@ -1009,10 +1001,18 @@ impl Spinner {
             frames: MONKEY_FRAMES,
             index: 0,
             last_advance: None,
-            last_content: None,
             min_dur: SPINNER_MIN_DUR,
-            sleep_after: SPINNER_SLEEP_AFTER,
             disabled: false,
+        }
+    }
+
+    /// Create a spinner that advances on every `prefix()` call with no rate
+    /// limiting. Use this with a background ticker thread that calls `prefix()`
+    /// at the desired frame rate.
+    pub fn constant_rate() -> Self {
+        Self {
+            min_dur: Duration::ZERO,
+            ..Self::new()
         }
     }
 
@@ -1022,11 +1022,6 @@ impl Spinner {
             disabled: true,
             ..Self::new()
         }
-    }
-
-    /// Signal that new content arrived, resetting the sleep timer.
-    pub fn touch(&mut self) {
-        self.last_content = Some(Instant::now());
     }
 
     /// Advance the spinner (rate-limited) and return the current frame + trailing
@@ -1057,46 +1052,6 @@ impl Spinner {
         self.frames[self.index]
     }
 
-    /// Whether the spinner is in the sleeping (💤) state — no content update
-    /// for longer than the sleep threshold.
-    pub fn is_sleeping(&self) -> bool {
-        match self.last_content {
-            None => false,
-            Some(t) => Instant::now().duration_since(t) >= self.sleep_after,
-        }
-    }
-
-    /// Format the full prefix string including 💤 indicator and trailing space.
-    /// Allocates only when sleeping; returns a static str otherwise.
-    ///
-    /// For the non-allocating path, use [`current_prefix`](Spinner::current_prefix)
-    /// or [`prefix`](Spinner::prefix) and check [`is_sleeping`](Spinner::is_sleeping)
-    /// separately.
-    pub fn formatted_prefix(&mut self) -> String {
-        if self.disabled {
-            return String::new();
-        }
-        let frame = self.prefix();
-        if self.is_sleeping() {
-            format!("{frame}💤 ")
-        } else {
-            format!("{frame} ")
-        }
-    }
-
-    /// Like [`formatted_prefix`](Spinner::formatted_prefix) but does not advance
-    /// the frame. Use from ticker threads.
-    pub fn formatted_current_prefix(&self) -> String {
-        if self.disabled {
-            return String::new();
-        }
-        let frame = self.current_prefix();
-        if self.is_sleeping() {
-            format!("{frame}💤 ")
-        } else {
-            format!("{frame} ")
-        }
-    }
 }
 
 #[cfg(test)]
@@ -2742,46 +2697,14 @@ mod tests {
         let mut s = Spinner::disabled();
         assert_eq!(s.prefix(), "");
         assert_eq!(s.current_prefix(), "");
-        assert_eq!(s.formatted_prefix(), "");
-        assert_eq!(s.formatted_current_prefix(), "");
     }
 
     #[test]
-    fn spinner_not_sleeping_initially() {
-        let s = Spinner::new();
-        assert!(!s.is_sleeping());
-    }
-
-    #[test]
-    fn spinner_not_sleeping_after_touch() {
-        let mut s = Spinner::new();
-        s.touch();
-        assert!(!s.is_sleeping());
-    }
-
-    #[test]
-    fn spinner_sleeping_detection() {
-        let mut s = Spinner::new();
-        // Simulate an old touch by setting last_content to the past
-        s.last_content = Some(Instant::now() - Duration::from_secs(10));
-        assert!(s.is_sleeping());
-    }
-
-    #[test]
-    fn spinner_formatted_prefix_includes_zzz_when_sleeping() {
-        let mut s = Spinner::new();
-        s.last_content = Some(Instant::now() - Duration::from_secs(10));
-        let p = s.formatted_prefix();
-        assert!(p.contains("💤"), "expected 💤 in prefix, got: {p}");
-    }
-
-    #[test]
-    fn spinner_formatted_prefix_no_zzz_when_active() {
-        let mut s = Spinner::new();
-        s.touch();
-        let p = s.formatted_prefix();
-        assert!(!p.contains("💤"), "unexpected 💤 in prefix: {p}");
-        assert!(p.ends_with(' '), "prefix should end with space: {p:?}");
+    fn spinner_constant_rate_advances_every_call() {
+        let mut s = Spinner::constant_rate();
+        let f1 = s.prefix();
+        let f2 = s.prefix();
+        assert_ne!(f1, f2, "constant_rate spinner should advance on every prefix() call");
     }
 
     // --- In-progress test point tests ---

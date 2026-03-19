@@ -1217,7 +1217,7 @@ func TestStartTestPointEmitsSpinner(t *testing.T) {
 	tw := NewColorWriter(&buf, true)
 	tw.StartTestPoint("compiling")
 	out := buf.String()
-	expected := "\033[33m⡀⠀\033[0m 1 - compiling\n"
+	expected := "\033[33m⡇⠀\033[0m 1 - compiling\n"
 	if !strings.Contains(out, expected) {
 		t.Errorf("expected spinner line %q in output, got:\n%q", expected, out)
 	}
@@ -1270,8 +1270,8 @@ func TestUpdateInProgressAdvancesFrame(t *testing.T) {
 	tw.StartTestPoint("compiling")
 	tw.UpdateInProgress()
 	out := buf.String()
-	// Second frame is ⠄⠀
-	if !strings.Contains(out, "\033[33m⠄⠀\033[0m 1 - compiling") {
+	// Second frame is ⠏⠀
+	if !strings.Contains(out, "\033[33m⠏⠀\033[0m 1 - compiling") {
 		t.Errorf("expected second spinner frame, got:\n%q", out)
 	}
 }

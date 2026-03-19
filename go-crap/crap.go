@@ -16,6 +16,7 @@ const (
 	ansiGreen  = "\033[32m"
 	ansiRed    = "\033[31m"
 	ansiYellow = "\033[33m"
+	ansiDim    = "\033[2m"
 	ansiReset  = "\033[0m"
 )
 
@@ -229,7 +230,11 @@ func (tw *Writer) BailOut(reason string) {
 }
 
 func (tw *Writer) Comment(text string) {
-	fmt.Fprintf(tw.w, "# %s\n", text)
+	if tw.color {
+		fmt.Fprintf(tw.w, "%s# %s%s\n", ansiDim, text, ansiReset)
+	} else {
+		fmt.Fprintf(tw.w, "# %s\n", text)
+	}
 }
 
 func (tw *Writer) Pragma(key string, enabled bool) {
@@ -247,7 +252,11 @@ func (tw *Writer) Pragma(key string, enabled bool) {
 }
 
 func (tw *Writer) StreamedOutput(text string) {
-	fmt.Fprintf(tw.w, "# %s\n", text)
+	if tw.color {
+		fmt.Fprintf(tw.w, "%s# %s%s\n", ansiDim, text, ansiReset)
+	} else {
+		fmt.Fprintf(tw.w, "# %s\n", text)
+	}
 }
 
 func (tw *Writer) EnableTTYBuildLastLine() {
@@ -373,7 +382,11 @@ func (iw *indentWriter) Write(p []byte) (int, error) {
 
 func (tw *Writer) Subtest(name string) *Writer {
 	prefix := "    "
-	fmt.Fprintf(tw.w, "%s# Subtest: %s\n", prefix, name)
+	if tw.color {
+		fmt.Fprintf(tw.w, "%s%s# Subtest: %s%s\n", prefix, ansiDim, name, ansiReset)
+	} else {
+		fmt.Fprintf(tw.w, "%s# Subtest: %s\n", prefix, name)
+	}
 	iw := &indentWriter{w: tw.w, prefix: prefix}
 	child := &Writer{
 		w:       iw,

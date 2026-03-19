@@ -392,7 +392,11 @@ impl<'a> CrapWriter<'a> {
     }
 
     pub fn comment(&mut self, text: &str) -> io::Result<()> {
-        writeln!(self.w, "# {}", text)
+        if self.config.color {
+            writeln!(self.w, "\x1b[2m# {}\x1b[0m", text)
+        } else {
+            writeln!(self.w, "# {}", text)
+        }
     }
 
     pub fn update_last_line(&mut self, text: &str) -> io::Result<()> {
@@ -499,7 +503,11 @@ impl<'a> CrapWriter<'a> {
         name: &str,
         f: impl FnOnce(&mut CrapWriter) -> io::Result<()>,
     ) -> io::Result<()> {
-        writeln!(self.w, "    # Subtest: {}", name)?;
+        if self.config.color {
+            writeln!(self.w, "    \x1b[2m# Subtest: {}\x1b[0m", name)?;
+        } else {
+            writeln!(self.w, "    # Subtest: {}", name)?;
+        }
         let mut indent = IndentWriter { w: &mut *self.w };
         let mut config = self.config.clone();
         config.status_line = false;

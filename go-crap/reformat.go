@@ -45,6 +45,8 @@ func ReformatTAP(r io.Reader, w io.Writer, color bool) {
 		} else if m := bailOutLine.FindStringSubmatchIndex(line); m != nil {
 			rest := line[m[4]:m[5]]
 			fmt.Fprintf(w, "%s%s\n", colorToken("Bail out!", color, ansiRed), rest)
+		} else if color && strings.HasPrefix(strings.TrimLeft(line, " \t"), "#") {
+			fmt.Fprintf(w, "%s%s%s\n", ansiDim, line, ansiReset)
 		} else {
 			fmt.Fprintln(w, line)
 		}

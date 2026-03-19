@@ -8,6 +8,7 @@ github.com/benhoyt/goawk/lexer
 github.com/benhoyt/goawk/parser
 # github.com/creack/pty/v2 v2.0.1
 ## explicit; go 1.13
+github.com/creack/pty/v2
 # golang.org/x/text v0.34.0
 ## explicit; go 1.24.0
 golang.org/x/text/feature/plural

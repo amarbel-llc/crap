@@ -915,7 +915,7 @@ pub fn write_plan_locale(
 }
 
 const SPINNER_FRAMES: &[&str] = &[
-    "⡀⠀", "⠄⠀", "⠂⠀", "⠁⠀", "⠈⠀", "⠀⠁", "⠀⠈", "⠀⠐", "⠀⠠", "⠀⢀", "⠀⡀", "⢀⠀",
+    "⡇⠀", "⠏⠀", "⠋⠁", "⠉⠉", "⠈⠙", "⠀⠹", "⠀⢸", "⠀⣰", "⢀⣠", "⣀⣀", "⣄⡀", "⣆⠀",
 ];
 
 const MONKEY_FRAMES: &[&str] = &["🙈", "🙉", "🙊"];
@@ -2797,7 +2797,7 @@ mod tests {
         tw.start_test_point("compiling").unwrap();
         let out = String::from_utf8(buf).unwrap();
         assert!(
-            out.contains("\x1b[33m⡀⠀\x1b[0m 1 - compiling\n"),
+            out.contains("\x1b[33m⡇⠀\x1b[0m 1 - compiling\n"),
             "expected spinner line, got:\n{out}"
         );
         assert!(
@@ -3041,7 +3041,7 @@ mod tests {
         tw.update_in_progress().unwrap();
         let out = String::from_utf8(buf).unwrap();
         assert!(
-            out.contains("\x1b[33m⠄⠀\x1b[0m 1 - compiling"),
+            out.contains("\x1b[33m⠏⠀\x1b[0m 1 - compiling"),
             "expected second spinner frame, got:\n{out}"
         );
     }

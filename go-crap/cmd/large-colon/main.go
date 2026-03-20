@@ -41,10 +41,19 @@ func main() {
 	case "help", "-h", "--help":
 		printUsage()
 	default:
-		command := os.Args[1]
-		args := os.Args[2:]
+		args := os.Args[1:]
+		var noSpinner string
+		rest := parseFlags(args, map[string]*string{
+			"--no-spinner": &noSpinner,
+		}, nil)
+		if len(rest) == 0 {
+			fmt.Fprintf(os.Stderr, "error: missing command\n")
+			os.Exit(1)
+		}
+		command := rest[0]
+		cmdArgs := rest[1:]
 		color := stdoutIsTerminal()
-		exitCode := crap.RunWithPTYReformat(ctx, command, args, os.Stdout, color)
+		exitCode := crap.RunWithPTYReformat(ctx, command, cmdArgs, os.Stdout, color, crap.WithSpinner(noSpinner != "true"))
 		if exitCode != 0 {
 			os.Exit(exitCode)
 		}

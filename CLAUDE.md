@@ -1,20 +1,22 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Claude Code (claude.ai/code) when working with
+code in this repository.
 
 ## Overview
 
 CRAP (Command Result Accessibility Protocol) is a fork of TAP focused on making
-trees of script output easy to visually understand for human consumers. This repo
-contains the CRAP-2 specification, amendments, and two implementation libraries:
+trees of script output easy to visually understand for human consumers. This
+repo contains the CRAP-2 specification, amendments, and two implementation
+libraries:
 
-- **go-crap** — Go library + CLI (`large-colon`, aka `::`) for validating,
+- **go-crap** --- Go library + CLI (`large-colon`, aka `::`) for validating,
   converting, and writing CRAP-2 streams
-- **rust-crap** — Rust library for writing CRAP-2 streams
+- **rust-crap** --- Rust library for writing CRAP-2 streams
 
 ## Build & Test
 
-```sh
+``` sh
 just build          # nix build --show-trace (builds large-colon + rust-crap)
 just test           # run all tests (Go + Rust)
 just test-go        # Go tests only (cd go-crap && go test ./...)
@@ -31,24 +33,24 @@ just run-nix <args> # run large-colon via nix run
 The Go module (`github.com/amarbel-llc/crap/go-crap`) is both a library and the
 source for the `large-colon` CLI (binary name `::` in usage). Key files:
 
-- `crap.go` — `Writer` type: core CRAP-2 stream writer with color, locale
+- `crap.go` --- `Writer` type: core CRAP-2 stream writer with color, locale
   formatting, subtests, streamed output, and status line support
-- `reader.go` — `Reader` type: CRAP-2 parser producing diagnostics and summary
-- `parse.go` — Low-level line parsing (plans, test points, directives)
-- `classify.go` — Line classification for the parser
-- `diagnostic.go` — Diagnostic types (severity, rules) for validation
-- `gotest.go` — Converts `go test -json` output to CRAP-2
-- `cargotest.go` — Converts `cargo test` output to CRAP-2
-- `reformat.go` — Reads TAP/CRAP from stdin, emits colorized CRAP-2
-- `execparallel.go` — Parallel command execution with CRAP-2 output
-- `cmd/large-colon/main.go` — CLI entry point with subcommands: `validate`,
+- `reader.go` --- `Reader` type: CRAP-2 parser producing diagnostics and summary
+- `parse.go` --- Low-level line parsing (plans, test points, directives)
+- `classify.go` --- Line classification for the parser
+- `diagnostic.go` --- Diagnostic types (severity, rules) for validation
+- `gotest.go` --- Converts `go test -json` output to CRAP-2
+- `cargotest.go` --- Converts `cargo test` output to CRAP-2
+- `reformat.go` --- Reads TAP/CRAP from stdin, emits colorized CRAP-2
+- `execparallel.go` --- Parallel command execution with CRAP-2 output
+- `cmd/large-colon/main.go` --- CLI entry point with subcommands: `validate`,
   `go-test`, `cargo-test`, `reformat`, `exec`, `exec-parallel`
 
 ### Rust library (`rust-crap/`)
 
 `CrapWriter` with builder pattern (`CrapWriterBuilder`), supporting color, ICU
 locale formatting, subtests, YAML diagnostics, status line, and streamed output.
-Library only — no binary.
+Library only --- no binary.
 
 ### Specification
 
@@ -62,14 +64,32 @@ rewriting.
 Uses the standard stable-first nixpkgs convention (see parent `eng` CLAUDE.md).
 DevShell combines Go, Rust, and shell devenvs.
 
+## `::` Responsibility Model
+
+`:: <utility>` expects the utility to emit **TAP-14** (or CRAP-2) on stdout.
+`::` reformats this into CRAP-2 with improved UX (colorization, status line,
+spinner). The responsibility for producing well-formed TAP belongs to the
+**utility**, not to `::`.
+
+- **Utility emits TAP-14** → `::` reformats into CRAP-2 (happy path)
+- **Utility has no TAP support** → an awk fallback script in
+  `go-crap/awk/<tool>/` transforms tool-specific output into TAP, which `::`
+  then reformats
+- **No awk fallback exists** → `::` wraps the entire output as a single opaque
+  test point
+
+If a utility's output is not being reformatted correctly, the fix almost always
+belongs in the utility (or in a new awk fallback), **not** in `::` itself. Do
+not add heuristic TAP detection or line-scanning to `RunWithPTYReformat`.
+
 ## Key Conventions
 
 - The CLI binary is named `large-colon` in Nix but its usage text shows `::` as
   the command name
 - CRAP-2 version line is `CRAP version 2` (not TAP version 14)
 - All pragmas defined by CRAP-2 are **enabled by default** (unlike TAP-14 where
-  they require opt-in) — pragma lines primarily disable features
+  they require opt-in) --- pragma lines primarily disable features
 - Subtests are indented 4 spaces; YAML diagnostics 2 spaces relative to their
   test point
 - GPG signing is required for commits
-- `TODO.md` is a symlink to `TODOODOO.md` — yes, this is hilarious
+- `TODO.md` is a symlink to `TODOODOO.md` --- yes, this is hilarious

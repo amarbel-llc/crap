@@ -3,14 +3,40 @@ package crap
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"image/color"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
+	pty "github.com/creack/pty/v2"
 	"github.com/tonistiigi/vt100"
 )
+
+// syncWriter is a concurrency-safe io.Writer for capturing output mid-flight.
+type syncWriter struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (sw *syncWriter) Write(p []byte) (int, error) {
+	sw.mu.Lock()
+	defer sw.mu.Unlock()
+	return sw.buf.Write(p)
+}
+
+func (sw *syncWriter) snapshot() []byte {
+	sw.mu.Lock()
+	defer sw.mu.Unlock()
+	cp := make([]byte, sw.buf.Len())
+	copy(cp, sw.buf.Bytes())
+	return cp
+}
 
 // renderScreen feeds raw output bytes through a 120x80 VT100 emulator
 // and returns the visible lines (trailing blank lines trimmed) and the
@@ -59,6 +85,50 @@ func cellsHaveColor(formats [][]vt100.Format, row, startCol, endCol int, fg colo
 		}
 	}
 	return true
+}
+
+// renderLineANSI reconstructs an ANSI-colored string from a vt100 line and
+// its format row by emitting 24-bit SGR sequences on color transitions.
+func renderLineANSI(line string, fmtRow []vt100.Format) string {
+	var b strings.Builder
+	var prevFg color.RGBA
+	zero := color.RGBA{}
+	for i, r := range line {
+		var fg color.RGBA
+		if i < len(fmtRow) {
+			fg = fmtRow[i].Fg
+		}
+		if fg != prevFg {
+			if fg == zero {
+				b.WriteString("\033[0m")
+			} else {
+				fmt.Fprintf(&b, "\033[38;2;%d;%d;%dm", fg.R, fg.G, fg.B)
+			}
+			prevFg = fg
+		}
+		b.WriteRune(r)
+	}
+	if prevFg != zero {
+		b.WriteString("\033[0m")
+	}
+	return b.String()
+}
+
+// colorMismatch returns an error message showing ANSI-rendered actual and
+// expected lines when a color assertion fails. expectedFg is applied to
+// columns [startCol, endCol) in the expected rendering.
+func colorMismatch(t *testing.T, lines []string, formats [][]vt100.Format, row, startCol, endCol int, expectedFg color.RGBA) {
+	t.Helper()
+	actual := renderLineANSI(lines[row], formats[row])
+
+	expectedFmt := make([]vt100.Format, len(formats[row]))
+	copy(expectedFmt, formats[row])
+	for col := startCol; col < endCol && col < len(expectedFmt); col++ {
+		expectedFmt[col].Fg = expectedFg
+	}
+	expected := renderLineANSI(lines[row], expectedFmt)
+
+	t.Errorf("color mismatch on line %d:\nexpected: %s\n  actual: %s", row, expected, actual)
 }
 
 func cellsAreDim(formats [][]vt100.Format, row, startCol, endCol int) bool {
@@ -189,7 +259,7 @@ func TestVTTAPColorOkGreen(t *testing.T) {
 	}
 	col := strings.Index(lines[idx], "ok")
 	if !cellsHaveColor(formats, idx, col, col+2, vt100.Green) {
-		t.Errorf("'ok' at line %d col %d should be green", idx, col)
+		colorMismatch(t, lines, formats, idx, col, col+2, vt100.Green)
 	}
 }
 
@@ -201,7 +271,7 @@ func TestVTTAPColorNotOkRed(t *testing.T) {
 	}
 	col := strings.Index(lines[idx], "not ok")
 	if !cellsHaveColor(formats, idx, col, col+6, vt100.Red) {
-		t.Errorf("'not ok' at line %d col %d should be red", idx, col)
+		colorMismatch(t, lines, formats, idx, col, col+6, vt100.Red)
 	}
 }
 
@@ -216,7 +286,7 @@ func TestVTTAPColorSkipYellow(t *testing.T) {
 		t.Fatalf("missing '# SKIP' on test_lint line: %q", lines[idx])
 	}
 	if !cellsHaveColor(formats, idx, skipCol, skipCol+6, vt100.Yellow) {
-		t.Errorf("'# SKIP' at line %d col %d should be yellow", idx, skipCol)
+		colorMismatch(t, lines, formats, idx, skipCol, skipCol+6, vt100.Yellow)
 	}
 }
 
@@ -240,7 +310,7 @@ func TestVTTAPColorNestedOkGreen(t *testing.T) {
 	}
 	col := strings.Index(lines[idx], "ok")
 	if !cellsHaveColor(formats, idx, col, col+2, vt100.Green) {
-		t.Errorf("nested 'ok' at line %d col %d should be green", idx, col)
+		colorMismatch(t, lines, formats, idx, col, col+2, vt100.Green)
 	}
 }
 
@@ -292,6 +362,161 @@ func TestVTStatusLineShowsSpinnerWhileInProgress(t *testing.T) {
 	}
 }
 
+// --- Bug-documenting tests (skipped, tracked in amarbel-llc/crap#4) ---
+
+func TestVTRunWithPTYReformatShowsSpinnerMidFlight(t *testing.T) {
+	t.Skip("blocked: no output before first child line (amarbel-llc/crap#4)")
+
+	sw := &syncWriter{}
+	done := make(chan int, 1)
+	go func() {
+		code := RunWithPTYReformat(
+			context.Background(), "sh", []string{"-c", "sleep 2 && echo hello"}, sw, true,
+		)
+		done <- code
+	}()
+
+	time.Sleep(500 * time.Millisecond)
+
+	snap := sw.snapshot()
+	lines, _ := renderScreen(snap)
+
+	idx := findLine(lines, "sh -c sleep 2 && echo hello")
+	if idx < 0 {
+		t.Errorf("missing in-progress spinner line mid-flight\nall lines:\n%s", strings.Join(lines, "\n"))
+	} else {
+		runes := []rune(lines[idx])
+		if len(runes) < 2 || runes[0] < 0x2800 || runes[0] > 0x28FF {
+			t.Errorf("expected braille spinner at start of in-progress line, got %q", lines[idx])
+		}
+	}
+
+	code := <-done
+	if code != 0 {
+		t.Errorf("expected exit code 0, got %d", code)
+	}
+}
+
+func TestVTTAPStatusLineBetweenSlowLines(t *testing.T) {
+	t.Skip("blocked: no spinner in TAP path (amarbel-llc/crap#4)")
+
+	sw := &syncWriter{}
+	done := make(chan int, 1)
+	go func() {
+		code := RunWithPTYReformat(
+			context.Background(), "sh", []string{"-c",
+				"echo 'TAP version 14'; echo '1..2'; echo 'ok 1 - fast'; sleep 2; echo 'ok 2 - slow'",
+			}, sw, true,
+		)
+		done <- code
+	}()
+
+	time.Sleep(800 * time.Millisecond)
+
+	snap := sw.snapshot()
+	lines, _ := renderScreen(snap)
+
+	t.Logf("mid-flight TAP output (%d lines):", len(lines))
+	for i, l := range lines {
+		t.Logf("  %d: %q", i, l)
+	}
+
+	if findLine(lines, "CRAP-2") < 0 {
+		t.Error("missing CRAP-2 header mid-flight")
+	}
+
+	if findLine(lines, "ok 1 - fast") < 0 {
+		t.Error("missing 'ok 1 - fast' mid-flight")
+	}
+
+	hasSpinner := false
+	for _, l := range lines {
+		runes := []rune(l)
+		if len(runes) >= 2 && runes[0] >= 0x2800 && runes[0] <= 0x28FF {
+			hasSpinner = true
+			t.Logf("found spinner line: %q", l)
+			break
+		}
+	}
+	if !hasSpinner {
+		t.Error("no spinner visible mid-flight between slow TAP lines")
+	}
+
+	<-done
+}
+
+// --- Passing behavior tests ---
+
+func TestVTSpinnerAppearsAfterFirstOutput(t *testing.T) {
+	sw := &syncWriter{}
+	done := make(chan int, 1)
+	go func() {
+		code := RunWithPTYReformat(
+			context.Background(), "sh", []string{"-c", "echo hello; sleep 2"}, sw, true,
+		)
+		done <- code
+	}()
+
+	time.Sleep(500 * time.Millisecond)
+
+	snap := sw.snapshot()
+	lines, _ := renderScreen(snap)
+
+	idx := findLine(lines, "sh -c echo hello; sleep 2")
+	if idx < 0 {
+		t.Errorf("missing spinner line after first output\nall lines:\n%s", strings.Join(lines, "\n"))
+	} else {
+		runes := []rune(lines[idx])
+		if len(runes) < 2 || runes[0] < 0x2800 || runes[0] > 0x28FF {
+			t.Errorf("expected braille spinner, got %q", lines[idx])
+		}
+	}
+
+	<-done
+}
+
+func TestVTOpaqueStatusLineShowsLastOutput(t *testing.T) {
+	sw := &syncWriter{}
+	done := make(chan int, 1)
+	go func() {
+		code := RunWithPTYReformat(
+			context.Background(), "sh", []string{"-c",
+				"echo 'line one'; echo 'line two'; sleep 2",
+			}, sw, true,
+		)
+		done <- code
+	}()
+
+	time.Sleep(500 * time.Millisecond)
+
+	snap := sw.snapshot()
+	lines, _ := renderScreen(snap)
+
+	t.Logf("mid-flight opaque output (%d lines):", len(lines))
+	for i, l := range lines {
+		t.Logf("  %d: %q", i, l)
+	}
+
+	if findLine(lines, "line two") < 0 {
+		t.Error("missing status line with 'line two' mid-flight")
+	}
+
+	hasSpinner := false
+	for _, l := range lines {
+		runes := []rune(l)
+		if len(runes) >= 2 && runes[0] >= 0x2800 && runes[0] <= 0x28FF {
+			hasSpinner = true
+			t.Logf("found spinner line: %q", l)
+			break
+		}
+	}
+	if !hasSpinner {
+		t.Error("no spinner visible mid-flight in opaque path")
+	}
+
+	<-done
+}
+
 // --- Opaque path ---
 
 func TestVTOpaqueWrapsAsSingleTestPoint(t *testing.T) {
@@ -328,6 +553,256 @@ func TestVTOpaqueColorOkGreen(t *testing.T) {
 	}
 	col := strings.Index(lines[idx], "ok")
 	if !cellsHaveColor(formats, idx, col, col+2, vt100.Green) {
-		t.Errorf("'ok' should be green at line %d col %d", idx, col)
+		colorMismatch(t, lines, formats, idx, col, col+2, vt100.Green)
+	}
+}
+
+// buildLargeColon builds the :: binary once per test binary invocation.
+var (
+	largeColonOnce sync.Once
+	largeColonBin  string
+	largeColonErr  error
+)
+
+func requireLargeColon(t *testing.T) string {
+	t.Helper()
+	largeColonOnce.Do(func() {
+		dir, err := os.MkdirTemp("", "large-colon-test-*")
+		if err != nil {
+			largeColonErr = fmt.Errorf("failed to create temp dir: %s", err)
+			return
+		}
+		largeColonBin = filepath.Join(dir, "large-colon")
+		out, buildErr := exec.Command("go", "build", "-o", largeColonBin, "./cmd/large-colon").CombinedOutput()
+		if buildErr != nil {
+			largeColonErr = fmt.Errorf("failed to build large-colon: %s\n%s", buildErr, out)
+		}
+	})
+	if largeColonErr != nil {
+		t.Fatal(largeColonErr)
+	}
+	return largeColonBin
+}
+
+// runLargeColonPTY runs `:: <args>` in a real PTY (so stdoutIsTerminal()
+// returns true) and returns the final rendered screen. This matches how
+// users actually invoke :: from a terminal.
+func runLargeColonPTY(t *testing.T, args ...string) ([]string, [][]vt100.Format) {
+	t.Helper()
+	bin := requireLargeColon(t)
+	cmd := exec.Command(bin, args...)
+
+	ptmx, err := pty.Start(cmd)
+	if err != nil {
+		t.Fatalf("failed to start large-colon in PTY: %v", err)
+	}
+
+	var buf bytes.Buffer
+	io.Copy(&buf, ptmx)
+	cmd.Wait()
+
+	return renderScreen(buf.Bytes())
+}
+
+// runLargeColonPTYMidFlight runs `:: <args>` in a real PTY and snapshots
+// the output after delay, then waits for the command to finish.
+func runLargeColonPTYMidFlight(t *testing.T, delay time.Duration, args ...string) ([]string, [][]vt100.Format, *exec.Cmd) {
+	t.Helper()
+	bin := requireLargeColon(t)
+	cmd := exec.Command(bin, args...)
+
+	ptmx, err := pty.Start(cmd)
+	if err != nil {
+		t.Fatalf("failed to start large-colon in PTY: %v", err)
+	}
+
+	sw := &syncWriter{}
+	go io.Copy(sw, ptmx)
+
+	time.Sleep(delay)
+	snap := sw.snapshot()
+	lines, formats := renderScreen(snap)
+	return lines, formats, cmd
+}
+
+// --- End-to-end :: tests (real PTY, real binary) ---
+
+func TestE2ETAPFinalOutputHasCRAPHeader(t *testing.T) {
+	script := writeTAPScript(t)
+	lines, _ := runLargeColonPTY(t, script)
+
+	if findLine(lines, "CRAP-2") < 0 {
+		t.Errorf("missing CRAP-2 header in final :: output\nall lines:\n%s", strings.Join(lines, "\n"))
+	}
+}
+
+func TestE2ETAPPlanFormatPassthrough(t *testing.T) {
+	t.Skip("blocked: reformatter doesn't convert 1..N to 1::N (amarbel-llc/crap#4)")
+
+	dir := t.TempDir()
+	script := filepath.Join(dir, "tap-plan.sh")
+	os.WriteFile(script, []byte("#!/bin/sh\necho 'TAP version 14'\necho '1..2'\necho 'ok 1 - a'\necho 'ok 2 - b'\n"), 0o755)
+
+	lines, _ := runLargeColonPTY(t, script)
+
+	if findLine(lines, "1::2") < 0 {
+		t.Errorf("expected plan converted to CRAP format (1::2)\nall lines:\n%s", strings.Join(lines, "\n"))
+	}
+}
+
+func TestE2ETAPFinalOutputNoArtifacts(t *testing.T) {
+	script := writeTAPScript(t)
+	lines, _ := runLargeColonPTY(t, script)
+
+	for i, line := range lines {
+		trimmed := strings.TrimLeft(line, " ")
+		if strings.HasPrefix(trimmed, "# ok ") || strings.HasPrefix(trimmed, "# not ok ") {
+			t.Errorf("line %d: status line artifact: %q", i, line)
+		}
+		if strings.HasPrefix(trimmed, "# 1::") || strings.HasPrefix(trimmed, "# 1..") {
+			t.Errorf("line %d: status line artifact: %q", i, line)
+		}
+	}
+}
+
+func TestE2ENoOutputBeforeFirstLine(t *testing.T) {
+	t.Skip("blocked: no output before first child line (amarbel-llc/crap#4)")
+
+	lines, _, cmd := runLargeColonPTYMidFlight(t, 500*time.Millisecond,
+		"sh", "-c", "sleep 2; echo hello")
+
+	t.Logf("mid-flight output before first line (%d lines):", len(lines))
+	for i, l := range lines {
+		t.Logf("  %d: %q", i, l)
+	}
+
+	if len(lines) == 0 {
+		t.Error("no output at all before child's first line — no spinner, no header")
+	} else {
+		hasHeader := findLine(lines, "CRAP-2") >= 0
+		hasSpinner := false
+		for _, l := range lines {
+			runes := []rune(l)
+			if len(runes) >= 2 && runes[0] >= 0x2800 && runes[0] <= 0x28FF {
+				hasSpinner = true
+				break
+			}
+		}
+		if !hasHeader {
+			t.Error("missing CRAP-2 header before first child output")
+		}
+		if !hasSpinner {
+			t.Error("missing spinner before first child output")
+		}
+	}
+
+	cmd.Wait()
+}
+
+func TestE2ETAPNoSpinnerBetweenLines(t *testing.T) {
+	t.Skip("blocked: no spinner in TAP path (amarbel-llc/crap#4)")
+
+	dir := t.TempDir()
+	script := filepath.Join(dir, "slow-tap.sh")
+	os.WriteFile(script, []byte("#!/bin/sh\necho 'TAP version 14'\necho '1..2'\necho 'ok 1 - fast'\nsleep 2\necho 'ok 2 - slow'\n"), 0o755)
+
+	lines, _, cmd := runLargeColonPTYMidFlight(t, 800*time.Millisecond, script)
+
+	t.Logf("mid-flight TAP via :: (%d lines):", len(lines))
+	for i, l := range lines {
+		t.Logf("  %d: %q", i, l)
+	}
+
+	hasSpinner := false
+	for _, l := range lines {
+		runes := []rune(l)
+		if len(runes) >= 2 && runes[0] >= 0x2800 && runes[0] <= 0x28FF {
+			hasSpinner = true
+			t.Logf("found spinner: %q", l)
+			break
+		}
+	}
+	if !hasSpinner {
+		t.Error("no spinner visible mid-flight in TAP path via ::")
+	}
+
+	cmd.Wait()
+}
+
+func TestE2EOpaqueSpinnerAndStatusLine(t *testing.T) {
+	lines, _, cmd := runLargeColonPTYMidFlight(t, 500*time.Millisecond,
+		"sh", "-c", "echo 'building...'; echo 'compiling main.go'; sleep 2; echo 'done'")
+
+	t.Logf("mid-flight opaque via :: (%d lines):", len(lines))
+	for i, l := range lines {
+		t.Logf("  %d: %q", i, l)
+	}
+
+	if findLine(lines, "CRAP-2") < 0 {
+		t.Error("missing CRAP-2 header")
+	}
+
+	hasSpinner := false
+	for _, l := range lines {
+		runes := []rune(l)
+		if len(runes) >= 2 && runes[0] >= 0x2800 && runes[0] <= 0x28FF {
+			hasSpinner = true
+			break
+		}
+	}
+	if !hasSpinner {
+		t.Error("no spinner visible mid-flight in opaque path via ::")
+	}
+
+	if findLine(lines, "compiling main.go") < 0 {
+		t.Error("missing status line with 'compiling main.go'")
+	}
+
+	cmd.Wait()
+}
+
+func TestE2EOpaqueNonZeroExitFinal(t *testing.T) {
+	lines, formats := runLargeColonPTY(t, "sh", "-c", "echo oops; exit 1")
+
+	t.Logf("final output:\n%s", strings.Join(lines, "\n"))
+
+	idx := findLine(lines, "not ok")
+	if idx < 0 {
+		t.Fatal("missing 'not ok' for failed command")
+	}
+
+	col := strings.Index(lines[idx], "not ok")
+	if !cellsHaveColor(formats, idx, col, col+6, vt100.Red) {
+		colorMismatch(t, lines, formats, idx, col, col+6, vt100.Red)
+	}
+
+	for i, line := range lines {
+		trimmed := strings.TrimLeft(line, " ")
+		if strings.HasPrefix(trimmed, "# oops") {
+			t.Errorf("line %d: status line artifact not cleaned up: %q", i, line)
+		}
+	}
+}
+
+func TestE2ETAPColorInPTY(t *testing.T) {
+	script := writeTAPScript(t)
+	lines, formats := runLargeColonPTY(t, script)
+
+	idx := findLinePrefix(lines, "ok 1 - compilation")
+	if idx < 0 {
+		t.Fatal("missing 'ok 1 - compilation'")
+	}
+	col := strings.Index(lines[idx], "ok")
+	if !cellsHaveColor(formats, idx, col, col+2, vt100.Green) {
+		colorMismatch(t, lines, formats, idx, col, col+2, vt100.Green)
+	}
+
+	idx = findLine(lines, "not ok 2 - test_format")
+	if idx < 0 {
+		t.Fatal("missing 'not ok 2 - test_format'")
+	}
+	col = strings.Index(lines[idx], "not ok")
+	if !cellsHaveColor(formats, idx, col, col+6, vt100.Red) {
+		colorMismatch(t, lines, formats, idx, col, col+6, vt100.Red)
 	}
 }

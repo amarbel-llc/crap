@@ -365,7 +365,6 @@ func TestVTStatusLineShowsSpinnerWhileInProgress(t *testing.T) {
 // --- Bug-documenting tests (skipped, tracked in amarbel-llc/crap#4) ---
 
 func TestVTRunWithPTYReformatShowsSpinnerMidFlight(t *testing.T) {
-	t.Skip("blocked: no output before first child line (amarbel-llc/crap#4)")
 
 	sw := &syncWriter{}
 	done := make(chan int, 1)
@@ -398,7 +397,6 @@ func TestVTRunWithPTYReformatShowsSpinnerMidFlight(t *testing.T) {
 }
 
 func TestVTTAPStatusLineBetweenSlowLines(t *testing.T) {
-	t.Skip("blocked: no spinner in TAP path (amarbel-llc/crap#4)")
 
 	sw := &syncWriter{}
 	done := make(chan int, 1)
@@ -637,7 +635,6 @@ func TestE2ETAPFinalOutputHasCRAPHeader(t *testing.T) {
 }
 
 func TestE2ETAPPlanFormatPassthrough(t *testing.T) {
-	t.Skip("blocked: reformatter doesn't convert 1..N to 1::N (amarbel-llc/crap#4)")
 
 	dir := t.TempDir()
 	script := filepath.Join(dir, "tap-plan.sh")
@@ -666,7 +663,6 @@ func TestE2ETAPFinalOutputNoArtifacts(t *testing.T) {
 }
 
 func TestE2ENoOutputBeforeFirstLine(t *testing.T) {
-	t.Skip("blocked: no output before first child line (amarbel-llc/crap#4)")
 
 	lines, _, cmd := runLargeColonPTYMidFlight(t, 500*time.Millisecond,
 		"sh", "-c", "sleep 2; echo hello")
@@ -700,7 +696,6 @@ func TestE2ENoOutputBeforeFirstLine(t *testing.T) {
 }
 
 func TestE2ETAPNoSpinnerBetweenLines(t *testing.T) {
-	t.Skip("blocked: no spinner in TAP path (amarbel-llc/crap#4)")
 
 	dir := t.TempDir()
 	script := filepath.Join(dir, "slow-tap.sh")

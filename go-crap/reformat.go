@@ -12,6 +12,7 @@ var (
 	okLine      = regexp.MustCompile(`^(ok\b)(.*)`)
 	notOkLine   = regexp.MustCompile(`^(not ok\b)(.*)`)
 	bailOutLine = regexp.MustCompile(`^(Bail out!)(.*)`)
+	tapPlanLine = regexp.MustCompile(`^1\.\.(\d+)(.*)$`)
 	skipDir     = regexp.MustCompile(`(?i)#\s*skip\b`)
 	todoDir     = regexp.MustCompile(`(?i)#\s*todo\b`)
 	warnDir     = regexp.MustCompile(`(?i)#\s*warn\b`)
@@ -28,7 +29,13 @@ func ReformatTAP(r io.Reader, w io.Writer, color bool) {
 		line := scanner.Text()
 
 		// Drop any existing version line — we already emitted ours.
-		if strings.HasPrefix(line, "CRAP-2") || strings.HasPrefix(line, "CRAP version ") {
+		if strings.HasPrefix(line, "CRAP-2") || strings.HasPrefix(line, "CRAP version ") || strings.HasPrefix(line, "TAP version ") {
+			continue
+		}
+
+		// Convert TAP plan (1..N) to CRAP plan (1::N).
+		if m := tapPlanLine.FindStringSubmatch(line); m != nil {
+			fmt.Fprintf(w, "1::%s%s\n", m[1], m[2])
 			continue
 		}
 

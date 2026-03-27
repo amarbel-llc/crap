@@ -46,6 +46,7 @@ type Writer struct {
 	statusLineActive  bool
 	statusProcessor   *StatusLineProcessor
 	inProgressActive  bool
+	inProgressWaiting bool
 	inProgressFrame   int
 	inProgressDesc    string
 	inProgressNum     string
@@ -303,6 +304,40 @@ func (tw *Writer) clearStatusIfActive() {
 	}
 }
 
+// StartSpinner emits a spinner line without claiming a test number. Use this
+// to show activity while waiting for output. No-op if color is false.
+func (tw *Writer) StartSpinner(description string) {
+	if !tw.color {
+		return
+	}
+	tw.clearStatusIfActive()
+	tw.inProgressDesc = description
+	tw.inProgressFrame = 0
+	tw.inProgressActive = true
+	tw.inProgressWaiting = true
+	frame := spinnerFrames[tw.inProgressFrame]
+	fmt.Fprintf(tw.w, "%s%s%s%s %s\n%s",
+		ansiSyncStart, ansiYellow, frame, ansiReset,
+		tw.inProgressDesc, ansiSyncEnd)
+}
+
+// CancelSpinner clears a spinner line started by StartSpinner without writing
+// any test result. No-op if no spinner is active.
+func (tw *Writer) CancelSpinner() {
+	if !tw.inProgressActive {
+		return
+	}
+	tw.inProgressActive = false
+	tw.inProgressWaiting = false
+	linesUp := 1
+	if tw.statusLineActive {
+		linesUp = 2
+	}
+	up := strings.Repeat("\033[A", linesUp)
+	down := strings.Repeat("\033[B", linesUp-1)
+	fmt.Fprintf(tw.w, "%s%s\r\033[2K%s%s", ansiSyncStart, up, down, ansiSyncEnd)
+}
+
 // StartTestPoint emits an in-progress test point line with a yellow spinner
 // character. Only works when color is true (TTY mode); otherwise it is a no-op.
 // The caller must call FinishInProgress when the test completes.
@@ -336,9 +371,15 @@ func (tw *Writer) UpdateInProgress() {
 	}
 	up := strings.Repeat("\033[A", linesUp)
 	down := strings.Repeat("\033[B", linesUp-1)
-	fmt.Fprintf(tw.w, "%s%s\r\033[2K%s%s%s %s - %s\n%s%s",
-		ansiSyncStart, up, ansiYellow, frame, ansiReset,
-		tw.inProgressNum, tw.inProgressDesc, down, ansiSyncEnd)
+	if tw.inProgressWaiting {
+		fmt.Fprintf(tw.w, "%s%s\r\033[2K%s%s%s %s\n%s%s",
+			ansiSyncStart, up, ansiYellow, frame, ansiReset,
+			tw.inProgressDesc, down, ansiSyncEnd)
+	} else {
+		fmt.Fprintf(tw.w, "%s%s\r\033[2K%s%s%s %s - %s\n%s%s",
+			ansiSyncStart, up, ansiYellow, frame, ansiReset,
+			tw.inProgressNum, tw.inProgressDesc, down, ansiSyncEnd)
+	}
 }
 
 // FinishInProgress rewrites the in-progress test point line with the final

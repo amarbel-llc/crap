@@ -52,22 +52,6 @@ func RunWithPTYReformat(ctx context.Context, command string, args []string, w io
 
 	scanner := bufio.NewScanner(ptmx)
 
-	// Read the first line to detect TAP output.
-	var firstLine string
-	if scanner.Scan() {
-		firstLine = scanner.Text()
-	}
-
-	isTAP := strings.TrimSpace(firstLine) == "TAP version 14"
-
-	if isTAP {
-		return runTAPReformat(scanner, command, w, color, cfg, cmd)
-	}
-
-	return runOpaque(scanner, firstLine, command, args, w, color, cfg, cmd)
-}
-
-func runTAPReformat(scanner *bufio.Scanner, command string, w io.Writer, color bool, cfg execConfig, cmd *exec.Cmd) int {
 	tw := NewColorWriter(w, color)
 	if color {
 		tw.EnableTTYBuildLastLine()
@@ -75,22 +59,62 @@ func runTAPReformat(scanner *bufio.Scanner, command string, w io.Writer, color b
 	spinner := newStatusSpinner()
 	spinner.disabled = !cfg.spinner
 
+	desc := command
+	if len(args) > 0 {
+		desc = command + " " + strings.Join(args, " ")
+	}
+
 	var mu sync.Mutex
 	var lastContent string
 	stopTicker := startStatusTicker(tw, spinner, &mu, &lastContent)
+
+	// Show spinner while waiting for the child's first output line.
+	mu.Lock()
+	tw.StartSpinner(desc)
+	mu.Unlock()
+
+	// Read the first line to detect TAP output.
+	var firstLine string
+	if scanner.Scan() {
+		firstLine = scanner.Text()
+	}
+
+	mu.Lock()
+	tw.CancelSpinner()
+	mu.Unlock()
+
+	isTAP := strings.TrimSpace(firstLine) == "TAP version 14"
+
+	if isTAP {
+		return runTAPReformat(scanner, desc, tw, &mu, &lastContent, stopTicker, cfg, cmd)
+	}
+
+	return runOpaque(scanner, firstLine, desc, tw, &mu, &lastContent, stopTicker, cfg, cmd)
+}
+
+func runTAPReformat(scanner *bufio.Scanner, desc string, tw *Writer, mu *sync.Mutex, lastContent *string, stopTicker func(), cfg execConfig, cmd *exec.Cmd) int {
+	mu.Lock()
+	tw.StartSpinner(desc)
+	mu.Unlock()
 
 	for scanner.Scan() {
 		line := scanner.Text()
 
 		mu.Lock()
-		lastContent = line
+		*lastContent = line
+		tw.CancelSpinner()
 		tw.clearStatusIfActive()
-		reformatLine(tw.w, line, color)
+		reformatLine(tw.w, line, tw.color)
+		tw.StartSpinner(desc)
 		mu.Unlock()
 	}
 
-	stopTicker()
+	mu.Lock()
+	tw.CancelSpinner()
 	tw.clearStatusIfActive()
+	mu.Unlock()
+
+	stopTicker()
 
 	return waitExitCode(cmd)
 }
@@ -103,6 +127,12 @@ func reformatLine(w io.Writer, line string, color bool) {
 	indent := line[:len(line)-len(trimmed)]
 
 	if strings.HasPrefix(trimmed, "TAP version ") || strings.HasPrefix(trimmed, "CRAP version ") || strings.HasPrefix(trimmed, "CRAP-2") {
+		return
+	}
+
+	// Convert TAP plan (1..N) to CRAP plan (1::N), preserving indentation.
+	if m := tapPlanLine.FindStringSubmatch(trimmed); m != nil {
+		fmt.Fprintf(w, "%s1::%s%s\n", indent, m[1], m[2])
 		return
 	}
 
@@ -142,28 +172,12 @@ func waitExitCode(cmd *exec.Cmd) int {
 	return 1
 }
 
-func runOpaque(scanner *bufio.Scanner, firstLine, command string, args []string, w io.Writer, color bool, cfg execConfig, cmd *exec.Cmd) int {
-	tw := NewColorWriter(w, color)
-	if color {
-		tw.EnableTTYBuildLastLine()
-	}
-	spinner := newStatusSpinner()
-	spinner.disabled = !cfg.spinner
-
-	desc := command
-	if len(args) > 0 {
-		desc = command + " " + strings.Join(args, " ")
-	}
-
-	var mu sync.Mutex
-	var lastContent string
-	stopTicker := startStatusTicker(tw, spinner, &mu, &lastContent)
-
+func runOpaque(scanner *bufio.Scanner, firstLine, desc string, tw *Writer, mu *sync.Mutex, lastContent *string, stopTicker func(), cfg execConfig, cmd *exec.Cmd) int {
 	tw.StartTestPoint(desc)
 
 	if firstLine != "" {
 		mu.Lock()
-		lastContent = firstLine
+		*lastContent = firstLine
 		tw.UpdateLastLine(firstLine)
 		mu.Unlock()
 	}
@@ -171,7 +185,7 @@ func runOpaque(scanner *bufio.Scanner, firstLine, command string, args []string,
 	for scanner.Scan() {
 		line := scanner.Text()
 		mu.Lock()
-		lastContent = line
+		*lastContent = line
 		tw.UpdateLastLine(line)
 		mu.Unlock()
 	}
@@ -181,7 +195,7 @@ func runOpaque(scanner *bufio.Scanner, firstLine, command string, args []string,
 
 	exitCode := waitExitCode(cmd)
 
-	if color {
+	if tw.color {
 		tw.FinishInProgress(exitCode == 0)
 	} else if exitCode == 0 {
 		tw.Ok(desc)

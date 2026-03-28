@@ -3,14 +3,8 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/3e20095fe3c6cbb1ddcef89b26969a69a1570776";
-    nixpkgs-master.url = "github:NixOS/nixpkgs/ca82feec736331f4c438121a994344e08ed547f5";
+    nixpkgs-master.url = "github:NixOS/nixpkgs/e2dde111aea2c0699531dc616112a96cd55ab8b5";
     utils.url = "https://flakehub.com/f/numtide/flake-utils/0.1.102";
-    go = {
-      url = "github:amarbel-llc/purse-first?dir=devenvs/go";
-      inputs.nixpkgs.follows = "nixpkgs";
-      inputs.nixpkgs-master.follows = "nixpkgs-master";
-      inputs.utils.follows = "utils";
-    };
     rust = {
       url = "github:amarbel-llc/purse-first?dir=devenvs/rust";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -25,7 +19,7 @@
     };
     bob = {
       url = "github:amarbel-llc/bob";
-      inputs.nixpkgs.follows = "nixpkgs";
+      inputs.nixpkgs.follows = "nixpkgs-master";
       inputs.nixpkgs-master.follows = "nixpkgs-master";
       inputs.utils.follows = "utils";
     };
@@ -37,7 +31,6 @@
       nixpkgs,
       nixpkgs-master,
       utils,
-      go,
       rust,
       shell,
       bob,
@@ -45,21 +38,17 @@
     utils.lib.eachDefaultSystem (
       system:
       let
-        pkgs = import nixpkgs {
-          inherit system;
-          overlays = [
-            go.overlays.default
-          ];
-        };
+        pkgs = import nixpkgs { inherit system; };
+        pkgs-master = import nixpkgs-master { inherit system; };
 
-        large-colon = pkgs.buildGoModule {
+        large-colon = pkgs-master.buildGoModule {
           pname = "large-colon";
           version = "0.1.0";
           src = ./go-crap;
           subPackages = [ "cmd/large-colon" ];
           vendorHash = null;
 
-          nativeCheckInputs = [ pkgs.git ];
+          nativeCheckInputs = [ pkgs-master.git ];
 
           postInstall = ''
             ln -s $out/bin/large-colon "$out/bin/::"
@@ -72,7 +61,7 @@
           };
         };
 
-        crappy-git = pkgs.buildGoModule {
+        crappy-git = pkgs-master.buildGoModule {
           pname = "crappy-git";
           version = "0.1.0";
           src = ./go-crap;
@@ -90,7 +79,7 @@
           };
         };
 
-        crappy-brew = pkgs.buildGoModule {
+        crappy-brew = pkgs-master.buildGoModule {
           pname = "crappy-brew";
           version = "0.1.0";
           src = ./go-crap;
@@ -108,7 +97,7 @@
           };
         };
 
-        crappy-direnv = pkgs.buildGoModule {
+        crappy-direnv = pkgs-master.buildGoModule {
           pname = "crappy-direnv";
           version = "0.1.0";
           src = ./go-crap;
@@ -162,12 +151,17 @@
 
         devShells.default = pkgs.mkShell {
           inputsFrom = [
-            go.devShells.${system}.default
             rust.devShells.${system}.default
             shell.devShells.${system}.default
           ];
 
           packages = [
+            pkgs-master.go
+            pkgs-master.gopls
+            pkgs-master.gotools
+            pkgs-master.gofumpt
+            pkgs-master.goawk
+            pkgs-master.delve
             pkgs.just
             bob.packages.${system}.batman
           ];

@@ -602,6 +602,141 @@ func TestStreamedOutputPropagatedToSubtestWithoutPragma(t *testing.T) {
 	}
 }
 
+func TestOutputBlock(t *testing.T) {
+	var buf bytes.Buffer
+	tw := NewWriter(&buf)
+	ob := tw.StartOutputBlock("build")
+	ob.Line("compiling main.rs")
+	ob.Line("linking binary")
+	ob.Ok()
+	tw.Plan()
+	out := buf.String()
+	expected := "CRAP-2\n# Output: 1 - build\n    compiling main.rs\n    linking binary\nok 1 - build\n1::1\n"
+	if out != expected {
+		t.Errorf("expected:\n%s\ngot:\n%s", expected, out)
+	}
+}
+
+func TestOutputBlockNotOk(t *testing.T) {
+	var buf bytes.Buffer
+	tw := NewWriter(&buf)
+	ob := tw.StartOutputBlock("test")
+	ob.Line("running tests")
+	ob.Line("FAIL: test_parse")
+	ob.NotOk(map[string]string{"severity": "fail"})
+	tw.Plan()
+	out := buf.String()
+	if !strings.Contains(out, "# Output: 1 - test\n") {
+		t.Errorf("expected output block header, got:\n%s", out)
+	}
+	if !strings.Contains(out, "    running tests\n") {
+		t.Errorf("expected indented body line, got:\n%s", out)
+	}
+	if !strings.Contains(out, "not ok 1 - test\n") {
+		t.Errorf("expected not ok test point, got:\n%s", out)
+	}
+	if !strings.Contains(out, "  severity: fail\n") {
+		t.Errorf("expected YAML diagnostics, got:\n%s", out)
+	}
+}
+
+func TestOutputBlockEmpty(t *testing.T) {
+	var buf bytes.Buffer
+	tw := NewWriter(&buf)
+	ob := tw.StartOutputBlock("empty")
+	ob.Ok()
+	tw.Plan()
+	out := buf.String()
+	expected := "CRAP-2\n# Output: 1 - empty\nok 1 - empty\n1::1\n"
+	if out != expected {
+		t.Errorf("expected:\n%s\ngot:\n%s", expected, out)
+	}
+}
+
+func TestOutputBlockColor(t *testing.T) {
+	var buf bytes.Buffer
+	tw := NewColorWriter(&buf, true)
+	ob := tw.StartOutputBlock("build")
+	ob.Line("compiling")
+	ob.Ok()
+	tw.Plan()
+	out := buf.String()
+	// Header should be dim
+	if !strings.Contains(out, ansiDim+"# Output: 1 - build"+ansiReset) {
+		t.Errorf("expected dim header, got:\n%s", out)
+	}
+	// Body lines should be plain (no ANSI wrapping)
+	if !strings.Contains(out, "    compiling\n") {
+		t.Errorf("expected plain body line, got:\n%s", out)
+	}
+	// Test point should have green ok
+	if !strings.Contains(out, ansiGreen+"ok"+ansiReset+" 1 - build") {
+		t.Errorf("expected colored ok, got:\n%s", out)
+	}
+}
+
+func TestOutputBlockRoundTrip(t *testing.T) {
+	var buf bytes.Buffer
+	tw := NewWriter(&buf)
+	ob := tw.StartOutputBlock("build")
+	ob.Line("compiling main.rs")
+	ob.Line("linking binary")
+	ob.Ok()
+	tw.Plan()
+
+	reader := NewReader(strings.NewReader(buf.String()))
+	var events []Event
+	for {
+		ev, err := reader.Next()
+		if err != nil {
+			break
+		}
+		events = append(events, ev)
+	}
+
+	// Should have: Version, OutputHeader, OutputLine, OutputLine, TestPoint, Plan
+	var foundHeader, foundLine1, foundLine2, foundTP bool
+	for _, ev := range events {
+		switch ev.Type {
+		case EventOutputHeader:
+			foundHeader = true
+			if ev.OutputHeader.Number != 1 || ev.OutputHeader.Description != "build" {
+				t.Errorf("unexpected output header: %+v", ev.OutputHeader)
+			}
+		case EventOutputLine:
+			if ev.OutputLine == "compiling main.rs" {
+				foundLine1 = true
+			}
+			if ev.OutputLine == "linking binary" {
+				foundLine2 = true
+			}
+		case EventTestPoint:
+			if ev.TestPoint.Number == 1 && ev.TestPoint.Description == "build" {
+				foundTP = true
+			}
+		}
+	}
+	if !foundHeader {
+		t.Error("missing EventOutputHeader")
+	}
+	if !foundLine1 {
+		t.Error("missing first output line")
+	}
+	if !foundLine2 {
+		t.Error("missing second output line")
+	}
+	if !foundTP {
+		t.Error("missing correlated test point")
+	}
+
+	summary := reader.Summary()
+	if !summary.Valid {
+		for _, d := range reader.Diagnostics() {
+			t.Errorf("diagnostic: line %d: %s: %s", d.Line, d.Severity, d.Message)
+		}
+	}
+}
+
 func TestWriteAllOutputValidatesWithReader(t *testing.T) {
 	var buf bytes.Buffer
 	tw := NewWriter(&buf)

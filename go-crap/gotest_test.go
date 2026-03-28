@@ -332,14 +332,19 @@ func TestConvertEmitsPragmaAndStreamedOutput(t *testing.T) {
 		t.Errorf("streamed-output is default, should NOT emit pragma, got:\n%s", out)
 	}
 
-	// Streamed output comments should appear before the not ok line
-	commentIdx := strings.Index(out, "# foo_test.go:10: expected 1, got 2")
-	notOkIdx := strings.Index(out, "not ok")
-	if commentIdx < 0 {
-		t.Fatalf("expected streamed output comment in output:\n%s", out)
+	// Output block header should appear before the not ok line
+	headerIdx := strings.Index(out, "# Output:")
+	notOkIdx := strings.Index(out, "not ok 1 - TestBad")
+	if headerIdx < 0 {
+		t.Fatalf("expected Output Block header in output:\n%s", out)
 	}
-	if commentIdx > notOkIdx {
-		t.Error("streamed output comment should appear before not ok")
+	if headerIdx > notOkIdx {
+		t.Error("Output Block header should appear before not ok")
+	}
+
+	// Body lines should be 4-space indented
+	if !strings.Contains(out, "    foo_test.go:10: expected 1, got 2") {
+		t.Errorf("expected 4-space indented output body line in output:\n%s", out)
 	}
 
 	reader := NewReader(strings.NewReader(out))

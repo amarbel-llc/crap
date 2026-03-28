@@ -215,21 +215,22 @@ func emitCargoTest(tw *Writer, tr *cargoTestResult, verbose bool) {
 	case "failed":
 		stdout := strings.TrimSpace(tr.stdout)
 		if stdout != "" {
+			ob := tw.StartOutputBlock(tr.name)
 			for _, line := range strings.Split(stdout, "\n") {
 				if line != "" {
-					tw.StreamedOutput(line)
+					ob.Line(line)
 				}
 			}
-		}
-		diag := map[string]string{}
-		if stdout != "" {
+			diag := map[string]string{}
 			file, line := parseRustFileLine(stdout)
 			if file != "" {
 				diag["file"] = file
 				diag["line"] = line
 			}
+			ob.NotOk(diag)
+		} else {
+			tw.NotOk(tr.name, nil)
 		}
-		tw.NotOk(tr.name, diag)
 	case "ignored":
 		tw.Skip(tr.name, "ignored")
 	default:

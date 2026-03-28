@@ -455,6 +455,104 @@ func TestReaderStreamedOutputNotActiveByDefault(t *testing.T) {
 	}
 }
 
+func TestReaderOutputBlock(t *testing.T) {
+	input := "CRAP-2\n1::1\n# Output: 1 - build\n    compiling main.rs\n    linking binary\nok 1 - build\n"
+	events, diags, summary := collectEvents(input)
+
+	if !summary.Valid {
+		for _, d := range diags {
+			t.Errorf("diagnostic: line %d: %s: [%s] %s", d.Line, d.Severity, d.Rule, d.Message)
+		}
+		t.Fatal("expected valid stream")
+	}
+
+	var foundHeader, foundLine1, foundLine2, foundTP bool
+	for _, ev := range events {
+		switch ev.Type {
+		case EventOutputHeader:
+			foundHeader = true
+			if ev.OutputHeader.Number != 1 || ev.OutputHeader.Description != "build" {
+				t.Errorf("unexpected output header: %+v", ev.OutputHeader)
+			}
+		case EventOutputLine:
+			if ev.OutputLine == "compiling main.rs" {
+				foundLine1 = true
+			}
+			if ev.OutputLine == "linking binary" {
+				foundLine2 = true
+			}
+		case EventTestPoint:
+			if ev.TestPoint.Number == 1 && ev.TestPoint.Description == "build" {
+				foundTP = true
+			}
+		}
+	}
+	if !foundHeader {
+		t.Error("missing EventOutputHeader")
+	}
+	if !foundLine1 {
+		t.Error("missing first output line")
+	}
+	if !foundLine2 {
+		t.Error("missing second output line")
+	}
+	if !foundTP {
+		t.Error("missing correlated test point")
+	}
+}
+
+func TestReaderOutputBlockMismatchedID(t *testing.T) {
+	input := "CRAP-2\n1::1\n# Output: 1 - build\n    compiling\nok 2 - build\n"
+	_, diags, _ := collectEvents(input)
+
+	found := false
+	for _, d := range diags {
+		if d.Rule == "output-block-id-mismatch" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected output-block-id-mismatch diagnostic")
+	}
+}
+
+func TestReaderOutputBlockDescriptionMismatch(t *testing.T) {
+	input := "CRAP-2\n1::1\n# Output: 1 - build\n    compiling\nok 1 - test\n"
+	_, diags, _ := collectEvents(input)
+
+	found := false
+	for _, d := range diags {
+		if d.Rule == "output-block-description-mismatch" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected output-block-description-mismatch diagnostic")
+	}
+}
+
+func TestReaderOutputBlockEmpty(t *testing.T) {
+	input := "CRAP-2\n1::1\n# Output: 1 - empty\nok 1 - empty\n"
+	events, diags, summary := collectEvents(input)
+
+	if !summary.Valid {
+		for _, d := range diags {
+			t.Errorf("diagnostic: line %d: %s: [%s] %s", d.Line, d.Severity, d.Rule, d.Message)
+		}
+		t.Fatal("expected valid stream")
+	}
+
+	var foundHeader bool
+	for _, ev := range events {
+		if ev.Type == EventOutputHeader {
+			foundHeader = true
+		}
+	}
+	if !foundHeader {
+		t.Error("missing EventOutputHeader for empty output block")
+	}
+}
+
 func TestReaderUnclosedYAML(t *testing.T) {
 	input := "CRAP-2\n1::1\nnot ok 1 - fail\n  ---\n  message: broken\n"
 	_, diags, _ := collectEvents(input)

@@ -276,6 +276,72 @@ func (tw *Writer) StreamedOutput(text string) {
 	}
 }
 
+// OutputBlockWriter writes lines within an Output Block. Created by
+// StartOutputBlock; call Line() for body content, then Ok() or NotOk()
+// to close the block with the correlated test point.
+type OutputBlockWriter struct {
+	tw   *Writer
+	num  int
+	desc string
+}
+
+// StartOutputBlock begins an Output Block, claiming a test number and
+// emitting the header line. Call Line() to write body lines, then Ok()
+// or NotOk() to close with the correlated test point.
+func (tw *Writer) StartOutputBlock(description string) *OutputBlockWriter {
+	tw.clearStatusIfActive()
+	tw.n++
+	num := tw.formatNumber(tw.n)
+	if tw.color {
+		fmt.Fprintf(tw.w, "%s# Output: %s - %s%s\n", ansiDim, num, description, ansiReset)
+	} else {
+		fmt.Fprintf(tw.w, "# Output: %s - %s\n", num, description)
+	}
+	return &OutputBlockWriter{tw: tw, num: tw.n, desc: description}
+}
+
+// Line writes a 4-space indented body line within the Output Block.
+func (ob *OutputBlockWriter) Line(text string) {
+	fmt.Fprintf(ob.tw.w, "    %s\n", text)
+}
+
+// Ok closes the Output Block with an ok test point.
+func (ob *OutputBlockWriter) Ok() int {
+	fmt.Fprintf(ob.tw.w, "%s %s - %s\n", ob.tw.colorOk(), ob.tw.formatNumber(ob.num), ob.desc)
+	return ob.num
+}
+
+// NotOk closes the Output Block with a not ok test point and optional diagnostics.
+func (ob *OutputBlockWriter) NotOk(diagnostics map[string]string) int {
+	ob.tw.failed = true
+	fmt.Fprintf(ob.tw.w, "%s %s - %s\n", ob.tw.colorNotOk(), ob.tw.formatNumber(ob.num), ob.desc)
+	if len(diagnostics) > 0 {
+		fmt.Fprintln(ob.tw.w, "  ---")
+		keys := make([]string, 0, len(diagnostics))
+		for k := range diagnostics {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			v := sanitizeYAMLValue(diagnostics[k], ob.tw.color)
+			if strings.Contains(v, "\n") {
+				fmt.Fprintf(ob.tw.w, "  %s: |\n", k)
+				lines := strings.Split(v, "\n")
+				for len(lines) > 0 && lines[len(lines)-1] == "" {
+					lines = lines[:len(lines)-1]
+				}
+				for _, line := range lines {
+					fmt.Fprintf(ob.tw.w, "    %s\n", line)
+				}
+			} else {
+				fmt.Fprintf(ob.tw.w, "  %s: %s\n", k, v)
+			}
+		}
+		fmt.Fprintln(ob.tw.w, "  ...")
+	}
+	return ob.num
+}
+
 func (tw *Writer) EnableTTYBuildLastLine() {
 	tw.ttyBuildLastLine = true
 }

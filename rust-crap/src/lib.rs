@@ -411,6 +411,26 @@ impl<'a> CrapWriter<'a> {
         }
     }
 
+    /// Begin an Output Block, claiming a test number and emitting the header
+    /// line. Returns an `OutputBlockWriter` for writing body lines and closing
+    /// the block with `ok()` or `not_ok()`.
+    pub fn start_output_block(&mut self, desc: &str) -> io::Result<OutputBlockWriter<'_, 'a>> {
+        self.clear_status_if_active()?;
+        self.counter += 1;
+        let num = self.counter;
+        let num_str = self.config.format_number(num);
+        if self.config.color {
+            writeln!(self.w, "\x1b[2m# Output: {} - {}\x1b[0m", num_str, desc)?;
+        } else {
+            writeln!(self.w, "# Output: {} - {}", num_str, desc)?;
+        }
+        Ok(OutputBlockWriter {
+            writer: self,
+            num,
+            desc: desc.to_string(),
+        })
+    }
+
     pub fn start_test_point(&mut self, desc: &str) -> io::Result<()> {
         if !self.config.color {
             return Ok(());
@@ -662,6 +682,65 @@ impl<'a> CrapWriter<'a> {
             writeln!(child.w, "pragma +locale-formatting:{locale}")?;
         }
         f(&mut child)
+    }
+}
+
+/// Writes lines within an Output Block. Created by
+/// [`CrapWriter::start_output_block`]; call [`line()`](Self::line) for body
+/// content, then [`ok()`](Self::ok) or [`not_ok()`](Self::not_ok) to close.
+pub struct OutputBlockWriter<'a, 'w> {
+    writer: &'a mut CrapWriter<'w>,
+    num: usize,
+    desc: String,
+}
+
+impl OutputBlockWriter<'_, '_> {
+    /// Write a 4-space indented body line within the Output Block.
+    pub fn line(&mut self, text: &str) -> io::Result<()> {
+        writeln!(self.writer.w, "    {}", text)
+    }
+
+    /// Close the Output Block with an ok test point.
+    pub fn ok(self) -> io::Result<usize> {
+        let num_str = self.writer.config.format_number(self.num);
+        writeln!(
+            self.writer.w,
+            "{} {} - {}",
+            status_ok(self.writer.config.color()),
+            num_str,
+            self.desc
+        )?;
+        Ok(self.num)
+    }
+
+    /// Close the Output Block with a not ok test point.
+    pub fn not_ok(self) -> io::Result<usize> {
+        self.writer.failed = true;
+        let num_str = self.writer.config.format_number(self.num);
+        writeln!(
+            self.writer.w,
+            "{} {} - {}",
+            status_not_ok(self.writer.config.color()),
+            num_str,
+            self.desc
+        )?;
+        Ok(self.num)
+    }
+
+    /// Close the Output Block with a not ok test point and YAML diagnostics.
+    pub fn not_ok_diag(self, diagnostics: &[(&str, &str)]) -> io::Result<usize> {
+        self.writer.failed = true;
+        let num_str = self.writer.config.format_number(self.num);
+        let color = self.writer.config.color();
+        writeln!(
+            self.writer.w,
+            "{} {} - {}",
+            status_not_ok(color),
+            num_str,
+            self.desc
+        )?;
+        write_diagnostics_block(self.writer.w, diagnostics, color)?;
+        Ok(self.num)
     }
 }
 
@@ -2986,5 +3065,76 @@ mod tests {
             out.contains("\x1b[A\x1b[A\r\x1b[2K"),
             "expected double cursor-up for status line, got:\n{out}"
         );
+    }
+
+    #[test]
+    fn output_block_basic() {
+        let mut buf = Vec::new();
+        let mut tw = CrapWriterBuilder::new(&mut buf).build().unwrap();
+        let mut ob = tw.start_output_block("build").unwrap();
+        ob.line("compiling main.rs").unwrap();
+        ob.line("linking binary").unwrap();
+        ob.ok().unwrap();
+        tw.plan().unwrap();
+        let out = String::from_utf8(buf).unwrap();
+        let expected = "CRAP-2\n# Output: 1 - build\n    compiling main.rs\n    linking binary\nok 1 - build\n1::1\n";
+        assert_eq!(out, expected, "output block mismatch");
+    }
+
+    #[test]
+    fn output_block_not_ok() {
+        let mut buf = Vec::new();
+        let mut tw = CrapWriterBuilder::new(&mut buf).build().unwrap();
+        let mut ob = tw.start_output_block("test").unwrap();
+        ob.line("running tests").unwrap();
+        ob.line("FAIL: test_parse").unwrap();
+        ob.not_ok().unwrap();
+        tw.plan().unwrap();
+        let out = String::from_utf8(buf).unwrap();
+        assert!(out.contains("# Output: 1 - test\n"), "expected output block header");
+        assert!(out.contains("    running tests\n"), "expected indented body");
+        assert!(out.contains("not ok 1 - test\n"), "expected not ok test point");
+    }
+
+    #[test]
+    fn output_block_empty() {
+        let mut buf = Vec::new();
+        let mut tw = CrapWriterBuilder::new(&mut buf).build().unwrap();
+        let ob = tw.start_output_block("empty").unwrap();
+        ob.ok().unwrap();
+        tw.plan().unwrap();
+        let out = String::from_utf8(buf).unwrap();
+        let expected = "CRAP-2\n# Output: 1 - empty\nok 1 - empty\n1::1\n";
+        assert_eq!(out, expected, "empty output block mismatch");
+    }
+
+    #[test]
+    fn output_block_not_ok_diag() {
+        let mut buf = Vec::new();
+        let mut tw = CrapWriterBuilder::new(&mut buf).build().unwrap();
+        let mut ob = tw.start_output_block("test").unwrap();
+        ob.line("FAIL").unwrap();
+        ob.not_ok_diag(&[("severity", "fail")]).unwrap();
+        tw.plan().unwrap();
+        let out = String::from_utf8(buf).unwrap();
+        assert!(out.contains("not ok 1 - test\n"), "expected not ok");
+        assert!(out.contains("  severity: \"fail\"\n"), "expected YAML diagnostics");
+    }
+
+    #[test]
+    fn output_block_color() {
+        let mut buf = Vec::new();
+        let mut tw = CrapWriterBuilder::new(&mut buf).color(true).build().unwrap();
+        let mut ob = tw.start_output_block("build").unwrap();
+        ob.line("compiling").unwrap();
+        ob.ok().unwrap();
+        tw.plan().unwrap();
+        let out = String::from_utf8(buf).unwrap();
+        // Header should be dim
+        assert!(out.contains("\x1b[2m# Output: 1 - build\x1b[0m"), "expected dim header");
+        // Body lines should be plain (no ANSI wrapping)
+        assert!(out.contains("    compiling\n"), "expected plain body line");
+        // Test point should have green ok
+        assert!(out.contains("\x1b[32mok\x1b[0m 1 - build"), "expected colored ok");
     }
 }

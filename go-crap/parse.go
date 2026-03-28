@@ -143,6 +143,29 @@ func parseBailOut(line string) BailOutResult {
 	return BailOutResult{Reason: strings.TrimSpace(reason)}
 }
 
+func parseOutputHeader(line string) (OutputHeaderResult, error) {
+	return parseOutputHeaderWithSep(line, "")
+}
+
+func parseOutputHeaderWithSep(line, sep string) (OutputHeaderResult, error) {
+	m := outputHeaderRegexp.FindStringSubmatch(line)
+	if m == nil {
+		return OutputHeaderResult{}, fmt.Errorf("invalid output block header: %q", line)
+	}
+	numStr := strings.TrimSpace(m[1])
+	if sep != "" {
+		numStr = strings.ReplaceAll(numStr, sep, "")
+	}
+	num, err := strconv.Atoi(numStr)
+	if err != nil {
+		return OutputHeaderResult{}, fmt.Errorf("invalid output block number: %v", err)
+	}
+	return OutputHeaderResult{
+		Number:      num,
+		Description: strings.TrimSpace(m[2]),
+	}, nil
+}
+
 func parsePragma(line string) PragmaResult {
 	rest := strings.TrimPrefix(line, "pragma ")
 	enabled := rest[0] == '+'

@@ -18,6 +18,7 @@ const (
 	linePragma
 	lineComment
 	lineSubtestComment
+	lineOutputHeader
 	lineEmpty
 )
 
@@ -31,6 +32,8 @@ var (
 	// nonSGRRegexp matches CSI sequences whose final byte is anything except
 	// 'm' (SGR), per the ANSI in YAML Output Blocks amendment.
 	nonSGRRegexp = regexp.MustCompile("\x1b\\[[0-9;]*[A-Za-ln-z]")
+	// outputHeaderRegexp matches Output Block header lines: # Output: <id> - <desc>
+	outputHeaderRegexp = regexp.MustCompile(`^# Output:\s+(\d[\d,.\x{00a0}\x{202f} ]*)\s+-\s+(.+)$`)
 )
 
 // stripANSI removes all CSI escape sequences from a string.
@@ -98,6 +101,10 @@ func classifyLine(line string) lineKind {
 
 	if strings.HasPrefix(line, "# Subtest") {
 		return lineSubtestComment
+	}
+
+	if outputHeaderRegexp.MatchString(line) {
+		return lineOutputHeader
 	}
 
 	if strings.HasPrefix(line, "#") {

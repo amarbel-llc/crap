@@ -22,14 +22,18 @@ const (
 )
 
 type frame struct {
-	depth          int
-	planSeen       bool
-	planCount      int
-	planLine       int
-	testCount      int
-	lastTestNumber int
-	streamedOutput bool
-	localeSep      string // grouping separator for active locale, empty = no locale
+	depth            int
+	planSeen         bool
+	planCount        int
+	planLine         int
+	testCount        int
+	lastTestNumber   int
+	streamedOutput   bool
+	localeSep        string // grouping separator for active locale, empty = no locale
+	inOutputBlock       bool
+	pendingOutputBlock  bool // true after output block body ends, before correlated test point
+	outputBlockNum      int
+	outputBlockDesc     string
 }
 
 // Reader is a streaming CRAP-2 parser and validator.
@@ -163,6 +167,32 @@ func (r *Reader) Next() (Event, error) {
 			continue
 		}
 
+		// Handle Output Block body lines: when inside an output block,
+		// 4-space indented lines relative to the frame are body lines.
+		// Unindented lines end the block and fall through to normal parsing.
+		if r.currentFrame().inOutputBlock {
+			blockIndent := (r.currentFrame().depth * 4) + 4
+			if indent >= blockIndent && strings.TrimSpace(raw) != "" {
+				// Body line — strip the 4-space block indent, use original to preserve ANSI
+				content := original
+				if len(content) >= blockIndent {
+					content = content[blockIndent:]
+				}
+				r.lastWasTestPoint = false
+				return Event{
+					Type:       EventOutputLine,
+					Line:       r.lineNum,
+					Depth:      r.currentFrame().depth,
+					Raw:        raw,
+					OutputLine: strings.TrimRight(content, " "),
+				}, nil
+			}
+			// Not indented enough or blank — end the output block,
+			// fall through to normal classification.
+			r.currentFrame().inOutputBlock = false
+			r.currentFrame().pendingOutputBlock = true
+		}
+
 		// Handle depth changes for subtests
 		if depth > r.currentFrame().depth {
 			r.stack = append(r.stack, frame{depth: depth})
@@ -219,6 +249,21 @@ func (r *Reader) Next() (Event, error) {
 			tp, tpDiags := parseTestPointWithSep(trimmed, f.localeSep)
 			r.diags = append(r.diags, tpDiags...)
 			f.testCount++
+
+			// Validate Output Block correlation
+			if f.pendingOutputBlock {
+				f.pendingOutputBlock = false
+				if tp.Number != f.outputBlockNum {
+					r.addDiag(SeverityError, "output-block-id-mismatch",
+						"output block header declared test "+strconv.Itoa(f.outputBlockNum)+
+							" but closing test point is "+strconv.Itoa(tp.Number))
+				}
+				if tp.Description != f.outputBlockDesc {
+					r.addDiag(SeverityWarning, "output-block-description-mismatch",
+						"output block description "+strconv.Quote(f.outputBlockDesc)+
+							" differs from test point "+strconv.Quote(tp.Description))
+				}
+			}
 
 			if tp.Number == 0 {
 				r.addDiag(SeverityWarning, "test-number-missing", "test point without explicit number")
@@ -298,6 +343,21 @@ func (r *Reader) Next() (Event, error) {
 			}
 			r.lastWasTestPoint = false
 			return Event{Type: EventPragma, Line: r.lineNum, Depth: depth, Raw: raw, Pragma: &p}, nil
+
+		case lineOutputHeader:
+			oh, _ := parseOutputHeaderWithSep(trimmed, r.currentFrame().localeSep)
+			f := r.currentFrame()
+			f.inOutputBlock = true
+			f.outputBlockNum = oh.Number
+			f.outputBlockDesc = oh.Description
+			r.lastWasTestPoint = false
+			return Event{
+				Type:         EventOutputHeader,
+				Line:         r.lineNum,
+				Depth:        depth,
+				Raw:          raw,
+				OutputHeader: &oh,
+			}, nil
 
 		case lineSubtestComment:
 			comment := strings.TrimPrefix(trimmed, "#")

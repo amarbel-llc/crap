@@ -221,31 +221,41 @@ func emitTest(tapWriter *Writer, pkg *packageResult, testRezult *testResult, ver
 	switch testRezult.action {
 	case "pass":
 		if verbose && output != "" {
+			ob := tapWriter.StartOutputBlock(name)
 			for _, line := range strings.Split(output, "\n") {
 				if line != "" {
-					tapWriter.StreamedOutput(line)
+					ob.Line(line)
 				}
 			}
+			ob.Ok()
+		} else {
+			tapWriter.Ok(name)
 		}
-		tapWriter.Ok(name)
 	case "fail":
 		if output != "" {
+			ob := tapWriter.StartOutputBlock(name)
 			for _, line := range strings.Split(output, "\n") {
 				if line != "" {
-					tapWriter.StreamedOutput(line)
+					ob.Line(line)
 				}
 			}
+			diag := map[string]string{
+				"elapsed": fmt.Sprintf("%.3f", testRezult.elapsed),
+				"package": pkg.name,
+			}
+			file, line := parseFileLine(output)
+			if file != "" {
+				diag["file"] = file
+				diag["line"] = line
+			}
+			ob.NotOk(diag)
+		} else {
+			diag := map[string]string{
+				"elapsed": fmt.Sprintf("%.3f", testRezult.elapsed),
+				"package": pkg.name,
+			}
+			tapWriter.NotOk(name, diag)
 		}
-		diag := map[string]string{
-			"elapsed": fmt.Sprintf("%.3f", testRezult.elapsed),
-			"package": pkg.name,
-		}
-		file, line := parseFileLine(output)
-		if file != "" {
-			diag["file"] = file
-			diag["line"] = line
-		}
-		tapWriter.NotOk(name, diag)
 	case "skip":
 		reason := extractSkipReason(output)
 		tapWriter.Skip(name, reason)

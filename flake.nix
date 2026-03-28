@@ -5,18 +5,6 @@
     nixpkgs.url = "github:NixOS/nixpkgs/3e20095fe3c6cbb1ddcef89b26969a69a1570776";
     nixpkgs-master.url = "github:NixOS/nixpkgs/e2dde111aea2c0699531dc616112a96cd55ab8b5";
     utils.url = "https://flakehub.com/f/numtide/flake-utils/0.1.102";
-    rust = {
-      url = "github:amarbel-llc/purse-first?dir=devenvs/rust";
-      inputs.nixpkgs.follows = "nixpkgs";
-      inputs.nixpkgs-master.follows = "nixpkgs-master";
-      inputs.utils.follows = "utils";
-    };
-    shell = {
-      url = "github:amarbel-llc/purse-first?dir=devenvs/shell";
-      inputs.nixpkgs.follows = "nixpkgs";
-      inputs.nixpkgs-master.follows = "nixpkgs-master";
-      inputs.utils.follows = "utils";
-    };
     bob = {
       url = "github:amarbel-llc/bob";
       inputs.nixpkgs.follows = "nixpkgs-master";
@@ -31,8 +19,6 @@
       nixpkgs,
       nixpkgs-master,
       utils,
-      rust,
-      shell,
       bob,
     }:
     utils.lib.eachDefaultSystem (
@@ -150,18 +136,32 @@
         };
 
         devShells.default = pkgs.mkShell {
-          inputsFrom = [
-            rust.devShells.${system}.default
-            shell.devShells.${system}.default
-          ];
-
           packages = [
+            # Go
             pkgs-master.go
             pkgs-master.gopls
             pkgs-master.gotools
             pkgs-master.gofumpt
             pkgs-master.goawk
             pkgs-master.delve
+
+            # Rust
+            pkgs.rustc
+            pkgs.cargo
+            pkgs.rustfmt
+            pkgs-master.rust-analyzer
+            pkgs-master.cargo-deny
+            pkgs-master.cargo-edit
+            pkgs-master.cargo-watch
+            pkgs.openssl
+            pkgs.pkg-config
+
+            # Shell
+            pkgs-master.bash-language-server
+            pkgs-master.shellcheck
+            pkgs-master.shfmt
+
+            # Tools
             pkgs.just
             bob.packages.${system}.batman
           ];

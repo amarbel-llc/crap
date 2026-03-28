@@ -363,38 +363,7 @@
         "bob": "bob",
         "nixpkgs": "nixpkgs_4",
         "nixpkgs-master": "nixpkgs-master_2",
-        "rust": "rust",
-        "shell": "shell",
         "utils": "utils_2"
-      }
-    },
-    "rust": {
-      "inputs": {
-        "nixpkgs": [
-          "nixpkgs"
-        ],
-        "nixpkgs-master": [
-          "nixpkgs-master"
-        ],
-        "rust-overlay": "rust-overlay_3",
-        "utils": [
-          "utils"
-        ]
-      },
-      "locked": {
-        "dir": "devenvs/rust",
-        "lastModified": 1773957262,
-        "narHash": "sha256-OtgZomTmNqZbqH5qGQz31emGas/NU1OYcUjzQSVsTs8=",
-        "owner": "amarbel-llc",
-        "repo": "purse-first",
-        "rev": "0618c70ec598744a0b5f46216ad1113a3887add3",
-        "type": "github"
-      },
-      "original": {
-        "dir": "devenvs/rust",
-        "owner": "amarbel-llc",
-        "repo": "purse-first",
-        "type": "github"
       }
     },
     "rust-analyzer-src": {
@@ -471,55 +440,6 @@
       "original": {
         "owner": "oxalica",
         "repo": "rust-overlay",
-        "type": "github"
-      }
-    },
-    "rust-overlay_3": {
-      "inputs": {
-        "nixpkgs": [
-          "rust",
-          "nixpkgs-master"
-        ]
-      },
-      "locked": {
-        "lastModified": 1773457417,
-        "narHash": "sha256-waABTSxPdbxml4BhcabHhyQF02Qnj27qRU4ard0mTQo=",
-        "owner": "oxalica",
-        "repo": "rust-overlay",
-        "rev": "055977c30249484010750e03074c744dcdaa0d23",
-        "type": "github"
-      },
-      "original": {
-        "owner": "oxalica",
-        "repo": "rust-overlay",
-        "type": "github"
-      }
-    },
-    "shell": {
-      "inputs": {
-        "nixpkgs": [
-          "nixpkgs"
-        ],
-        "nixpkgs-master": [
-          "nixpkgs-master"
-        ],
-        "utils": [
-          "utils"
-        ]
-      },
-      "locked": {
-        "dir": "devenvs/shell",
-        "lastModified": 1773957262,
-        "narHash": "sha256-OtgZomTmNqZbqH5qGQz31emGas/NU1OYcUjzQSVsTs8=",
-        "owner": "amarbel-llc",
-        "repo": "purse-first",
-        "rev": "0618c70ec598744a0b5f46216ad1113a3887add3",
-        "type": "github"
-      },
-      "original": {
-        "dir": "devenvs/shell",
-        "owner": "amarbel-llc",
-        "repo": "purse-first",
         "type": "github"
       }
     },

@@ -2,7 +2,7 @@
   description = "CRAP: Command Result Accessibility Protocol";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/3e20095fe3c6cbb1ddcef89b26969a69a1570776";
+    nixpkgs.url = "github:NixOS/nixpkgs/4590696c8693fea477850fe379a01544293ca4e2";
     nixpkgs-master.url = "github:NixOS/nixpkgs/e2dde111aea2c0699531dc616112a96cd55ab8b5";
     utils.url = "https://flakehub.com/f/numtide/flake-utils/0.1.102";
     bob = {
@@ -27,7 +27,7 @@
         pkgs = import nixpkgs { inherit system; };
         pkgs-master = import nixpkgs-master { inherit system; };
 
-        large-colon = pkgs-master.buildGoModule {
+        large-colon = pkgs-master.buildGoModule.override { go = pkgs-master.go_1_26; } {
           pname = "large-colon";
           version = "0.1.0";
           src = ./go-crap;
@@ -47,7 +47,7 @@
           };
         };
 
-        crappy-git = pkgs-master.buildGoModule {
+        crappy-git = pkgs-master.buildGoModule.override { go = pkgs-master.go_1_26; } {
           pname = "crappy-git";
           version = "0.1.0";
           src = ./go-crap;
@@ -65,7 +65,7 @@
           };
         };
 
-        crappy-brew = pkgs-master.buildGoModule {
+        crappy-brew = pkgs-master.buildGoModule.override { go = pkgs-master.go_1_26; } {
           pname = "crappy-brew";
           version = "0.1.0";
           src = ./go-crap;
@@ -83,7 +83,7 @@
           };
         };
 
-        crappy-direnv = pkgs-master.buildGoModule {
+        crappy-direnv = pkgs-master.buildGoModule.override { go = pkgs-master.go_1_26; } {
           pname = "crappy-direnv";
           version = "0.1.0";
           src = ./go-crap;
@@ -101,7 +101,7 @@
           };
         };
 
-        rust-crap = pkgs.rustPlatform.buildRustPackage {
+        rust-crap = pkgs-master.rustPlatform.buildRustPackage {
           pname = "rust-crap";
           version = "0.1.0";
           src = ./rust-crap;
@@ -138,17 +138,21 @@
         devShells.default = pkgs.mkShell {
           packages = [
             # Go
-            pkgs-master.go
+            pkgs-master.go_1_26
             pkgs-master.gopls
             pkgs-master.gotools
             pkgs-master.gofumpt
             pkgs-master.goawk
             pkgs-master.delve
+            pkgs-master.golangci-lint
+            pkgs-master.golines
+            pkgs-master.govulncheck
+            pkgs-master.parallel
 
             # Rust
-            pkgs.rustc
-            pkgs.cargo
-            pkgs.rustfmt
+            pkgs-master.rustc
+            pkgs-master.cargo
+            pkgs-master.rustfmt
             pkgs-master.rust-analyzer
             pkgs-master.cargo-deny
             pkgs-master.cargo-edit

@@ -2,12 +2,14 @@
   description = "CRAP: Command Result Accessibility Protocol";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/4590696c8693fea477850fe379a01544293ca4e2";
-    nixpkgs-master.url = "github:NixOS/nixpkgs/e2dde111aea2c0699531dc616112a96cd55ab8b5";
+    # Fork of upstream nixpkgs. overlays.default exposes buildGoApplication,
+    # gomod2nix, and other amarbel-llc additions.
+    nixpkgs.url = "github:amarbel-llc/nixpkgs";
+    nixpkgs-master.url = "github:NixOS/nixpkgs/d233902339c02a9c334e7e593de68855ad26c4cb";
     utils.url = "https://flakehub.com/f/numtide/flake-utils/0.1.102";
-    bob = {
-      url = "github:amarbel-llc/bob";
-      inputs.nixpkgs.follows = "nixpkgs-master";
+    bats = {
+      url = "github:amarbel-llc/bats";
+      inputs.nixpkgs.follows = "nixpkgs";
       inputs.nixpkgs-master.follows = "nixpkgs-master";
       inputs.utils.follows = "utils";
     };
@@ -19,12 +21,15 @@
       nixpkgs,
       nixpkgs-master,
       utils,
-      bob,
+      bats,
     }:
     utils.lib.eachDefaultSystem (
       system:
       let
-        pkgs = import nixpkgs { inherit system; };
+        pkgs = import nixpkgs {
+          inherit system;
+          overlays = [ nixpkgs.overlays.default ];
+        };
         pkgs-master = import nixpkgs-master { inherit system; };
 
         large-colon = pkgs-master.buildGoModule.override { go = pkgs-master.go_1_26; } {
@@ -167,7 +172,7 @@
 
             # Tools
             pkgs.just
-            bob.packages.${system}.batman
+            bats.packages.${system}.batman
           ];
         };
       }

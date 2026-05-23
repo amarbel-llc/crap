@@ -172,6 +172,7 @@
 
             # Tools
             pkgs.just
+            bats.packages.${system}.bats
             bats.packages.${system}.batman
           ];
         };

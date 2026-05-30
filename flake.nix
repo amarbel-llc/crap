@@ -4,12 +4,12 @@
   inputs = {
     # Fork of upstream nixpkgs. overlays.default exposes buildGoApplication,
     # gomod2nix, and other amarbel-llc additions.
-    nixpkgs.url = "github:amarbel-llc/igloo";
+    igloo.url = "github:amarbel-llc/igloo";
     nixpkgs-master.url = "github:NixOS/nixpkgs/d233902339c02a9c334e7e593de68855ad26c4cb";
     utils.url = "https://flakehub.com/f/numtide/flake-utils/0.1.102";
     bats = {
       url = "github:amarbel-llc/bats";
-      inputs.nixpkgs.follows = "nixpkgs";
+      inputs.igloo.follows = "igloo";
       inputs.nixpkgs-master.follows = "nixpkgs-master";
       inputs.utils.follows = "utils";
     };
@@ -18,7 +18,7 @@
   outputs =
     {
       self,
-      nixpkgs,
+      igloo,
       nixpkgs-master,
       utils,
       bats,
@@ -26,9 +26,9 @@
     utils.lib.eachDefaultSystem (
       system:
       let
-        pkgs = import nixpkgs {
+        pkgs = import igloo {
           inherit system;
-          overlays = [ nixpkgs.overlays.default ];
+          overlays = [ igloo.overlays.default ];
         };
         pkgs-master = import nixpkgs-master { inherit system; };
 

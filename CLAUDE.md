@@ -11,8 +11,34 @@ repo contains the CRAP-2 specification, amendments, and two implementation
 libraries:
 
 - **go-crap** --- Go library + CLI (`large-colon`, aka `::`) for validating,
-  converting, and writing CRAP-2 streams
-- **rust-crap** --- Rust library for writing CRAP-2 streams
+  converting, and writing CRAP-2 streams. Also home to the **canonical**
+  pieces: the `ndjsoncrap` package (the ndjson-crap wire format), the
+  `viewport` package (the bubbletea presenter), and the `crap-present` binary
+  (`:: present`) that renders an ndjson-crap stream via the viewport.
+- **rust-crap** --- Rust library for writing CRAP-2 (text profile) streams
+
+## Canonical format & presenter (ndjson-crap + viewport)
+
+CRAP-2's **canonical wire format** is **ndjson-crap** (newline-delimited JSON,
+specified in `docs/ndjson-crap-schema.md`) and its **canonical presenter** is
+the **viewport**. ndjson-crap is a superset that dries up the ecosystem's
+divergent ndjson-tap schemas: tap-dancer's `tap-ndjson(7)` result model
+(`plan`/`test`/`bailout`/`summary`) and just-us's `--events-fd` execution
+model (`node_start`/`command`/`output`/`node_end`, accepted via its
+`recipe_*` aliases). Go consumers import `go-crap/ndjsoncrap` +
+`go-crap/viewport`; non-Go producers (just-us, piggy) pipe their stream into
+the `crap-present` binary.
+
+`:: present` **delegates to the `crap-present` binary** rather than importing
+the viewport: bubbletea's `init()` probes the terminal (OSC 11) for any
+process that imports it, which must not happen for the general-purpose `::`
+subcommands. Keep `cmd/large-colon` free of bubbletea.
+
+The line-oriented CRAP-2 **text profile** (the `Writer`/`Reader` in `crap.go`
+/ `reader.go`, mirrored by rust-crap and exercised by the bats suites) is now
+**legacy**. Retargeting the converters (`gotest`/`cargotest`/`execparallel`)
+to emit ndjson-crap and retiring the text core is a tracked, incremental
+migration — do not assume it is done.
 
 ## Build & Test
 
@@ -65,6 +91,15 @@ Uses the standard stable-first nixpkgs convention (see parent `eng` CLAUDE.md).
 DevShell combines Go, Rust, and shell devenvs.
 
 ## `::` Responsibility Model
+
+There are two presentation paths:
+
+- **`:: present`** (canonical) — the utility emits **ndjson-crap** and `::
+  present` (which delegates to `crap-present`) renders it via the viewport.
+  This is the path new producers should target.
+- **`:: <utility>` / `:: reformat`** (legacy text profile) — described below;
+  the utility emits TAP-14/CRAP text and `::` reformats it into the CRAP-2
+  text profile with improved UX.
 
 `:: <utility>` expects the utility to emit **TAP-14** (or CRAP-2) on stdout.
 `::` reformats this into CRAP-2 with improved UX (colorization, status line,

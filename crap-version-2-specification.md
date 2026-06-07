@@ -23,10 +23,35 @@ Utilities that implement CRAP-2 are referred to as **crappy** — e.g.
 
 ## Synopsis
 
-CRAP, Command Result Accessibility Protocol, is a text-based format for
-structuring trees of script output so they are easy to visually understand.
-CRAP is a fork of TAP (the Test Anything Protocol) focused on human
-consumers. This document describes version 2 of CRAP.
+CRAP, Command Result Accessibility Protocol, structures trees of script
+output so they are easy to visually understand. CRAP is a fork of TAP (the
+Test Anything Protocol) focused on human consumers. This document describes
+version 2 of CRAP.
+
+CRAP-2 has two representations:
+
+* **ndjson-crap** — the *canonical* wire format: newline-delimited JSON, one
+  record per line, produced and consumed machine-to-machine. It is the
+  source of truth for a CRAP-2 stream's structure. Its schema is specified in
+  [`docs/ndjson-crap-schema.md`](docs/ndjson-crap-schema.md) and dries up the
+  divergent ndjson-tap schemas across the ecosystem — tap-dancer's
+  `tap-ndjson(7)` result model (`plan`/`test`/`bailout`/`summary`) and
+  just-us's `--events-fd` execution model
+  (`node_start`/`command`/`output`/`node_end`) — into one superset.
+* **the CRAP-2 text profile** — the *legacy* line-oriented rendering
+  described in the bulk of this document (the `CRAP-2` version line, `1::N`
+  plan, `ok`/`not ok` test points, YAML diagnostics, indented subtests). It
+  remains a valid presentation and is still produced by existing crappy
+  utilities, but it is no longer the canonical interchange format.
+
+The *canonical human presentation* of a CRAP-2 stream is the **viewport**: a
+live spinner + rolling output tail + progress region that persists one
+verdict line per test/node. It ships as the `crap-present` binary and the
+`:: present` subcommand. Producers emit ndjson-crap; the viewport renders it
+on a terminal, and falls back to a plain verdict-per-line rendering off a
+terminal. The status-line, streamed-output, in-progress-test-point, and
+ANSI-display amendments describe presentation behaviors the viewport
+realizes; they apply to the text profile as well.
 
 The key words _must_, _must not_, _required_, _shall_, _shall not_,
 _should_, _should not_, _recommended_, _may_, and _optional_ in this
@@ -63,9 +88,21 @@ are covered in much more detail below.
 * Increased clarity regarding parsing rules, based on behavior of
   extant TAP13 implementations in popular programming languages.
 
-## CRAP-2 Format
+## CRAP-2 Text Profile (legacy)
 
-CRAP-2's general grammar is:
+> The line-oriented format described from here on is the **legacy text
+> presentation profile**. It remains normative *for that profile*, and is
+> still produced and consumed by existing crappy utilities, but **ndjson-crap**
+> (see [`docs/ndjson-crap-schema.md`](docs/ndjson-crap-schema.md)) is the
+> canonical wire format for CRAP-2 and the **viewport** is its canonical
+> presenter. New producers SHOULD emit ndjson-crap and let the viewport (or a
+> text-profile renderer) handle display; the text profile maps onto
+> ndjson-crap record-for-record (a `1::N` plan ↔ a `plan` record, an
+> `ok`/`not ok` line ↔ a `test` record, a YAML block ↔ a test record's
+> `diagnostic`, an Output Block ↔ a test record's `output`, `Bail out!` ↔ a
+> `bailout` record).
+
+CRAP-2's general text-profile grammar is:
 
 ```ebnf
 CRAPDocument := Version Plan Body | Version Body Plan

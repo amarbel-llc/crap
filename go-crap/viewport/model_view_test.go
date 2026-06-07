@@ -21,7 +21,8 @@ func updateAll(m tea.Model, msgs ...tea.Msg) tea.Model {
 }
 
 func TestModel_TailKeepsLastNLinesInView(t *testing.T) {
-	got := updateAll(New(WithTailLines(3)),
+	got := updateAll(
+		New(WithTailLines(3)),
 		LogLine{Text: "a"}, LogLine{Text: "b"}, LogLine{Text: "c"}, LogLine{Text: "d"},
 	)
 	view := got.View()
@@ -55,7 +56,8 @@ func TestModel_HoldsAndShowsErrorOnFailure(t *testing.T) {
 
 func TestModel_BarOnlyWhenTotalKnown(t *testing.T) {
 	indeterminate := New(WithTitle("cap")).View()
-	determinate := updateAll(New(WithTitle("cap")),
+	determinate := updateAll(
+		New(WithTitle("cap")),
 		OperationStarted{Name: "cap", Total: 10},
 		OperationProgress{Current: 5, Total: 10},
 	).View()
@@ -71,7 +73,8 @@ func TestModel_BarOnlyWhenTotalKnown(t *testing.T) {
 }
 
 func TestModel_ByteBarWhenBytesTotalKnown(t *testing.T) {
-	view := updateAll(New(WithTitle("dl")),
+	view := updateAll(
+		New(WithTitle("dl")),
 		OperationProgress{Bytes: 512 * 1024, BytesTotal: 1024 * 1024},
 	).View()
 	if !strings.Contains(view, "%") {
@@ -83,7 +86,8 @@ func TestModel_ByteBarWhenBytesTotalKnown(t *testing.T) {
 }
 
 func TestModel_ByteCounterWhenOnlyDoneKnown(t *testing.T) {
-	view := updateAll(New(WithTitle("dl")),
+	view := updateAll(
+		New(WithTitle("dl")),
 		OperationProgress{Bytes: 2 * 1024 * 1024, BytesTotal: 0},
 	).View()
 	if strings.Contains(view, "%") {
@@ -95,7 +99,8 @@ func TestModel_ByteCounterWhenOnlyDoneKnown(t *testing.T) {
 }
 
 func TestModel_ItemBarTakesPrecedenceOverBytes(t *testing.T) {
-	view := updateAll(New(WithTitle("cap")),
+	view := updateAll(
+		New(WithTitle("cap")),
 		OperationStarted{Name: "cap", Total: 4},
 		OperationProgress{Current: 2, Total: 4, Bytes: 999, BytesTotal: 4096},
 	).View()
@@ -108,7 +113,8 @@ func TestModel_ItemBarTakesPrecedenceOverBytes(t *testing.T) {
 }
 
 func TestModel_PhaseStartedResetsLiveState(t *testing.T) {
-	m := updateAll(New(WithTitle("capture")),
+	m := updateAll(
+		New(WithTitle("capture")),
 		LogLine{Text: "old tail"},
 		OperationProgress{Current: 5, Total: 10, Bytes: 100, BytesTotal: 200},
 		PhaseStarted{Description: "write artifacts"},
@@ -206,8 +212,13 @@ func TestHumanizeBytes(t *testing.T) {
 		in   int64
 		want string
 	}{
-		{0, "0 B"}, {512, "512 B"}, {1023, "1023 B"}, {1024, "1.0 KiB"},
-		{1536, "1.5 KiB"}, {1024 * 1024, "1.0 MiB"}, {1024 * 1024 * 1024, "1.0 GiB"},
+		{0, "0 B"},
+		{512, "512 B"},
+		{1023, "1023 B"},
+		{1024, "1.0 KiB"},
+		{1536, "1.5 KiB"},
+		{1024 * 1024, "1.0 MiB"},
+		{1024 * 1024 * 1024, "1.0 GiB"},
 		{int64(1024) * 1024 * 1024 * 1024, "1.0 TiB"},
 	}
 	for _, tc := range cases {

@@ -60,6 +60,65 @@
         "type": "github"
       }
     },
+    "conformist": {
+      "inputs": {
+        "igloo": [
+          "igloo"
+        ],
+        "nixpkgs-master": [
+          "nixpkgs-master"
+        ],
+        "purse-first": "purse-first",
+        "utils": [
+          "utils"
+        ]
+      },
+      "locked": {
+        "lastModified": 1780872932,
+        "narHash": "sha256-S79nFo8f5CvRMX8E0Xl7Rw5YHjiahMjUhj0HR32Jeok=",
+        "owner": "amarbel-llc",
+        "repo": "conformist",
+        "rev": "4edeb28944a7fd939d2ddd2b876c2cb2dc5ad075",
+        "type": "github"
+      },
+      "original": {
+        "owner": "amarbel-llc",
+        "repo": "conformist",
+        "type": "github"
+      }
+    },
+    "conformist_2": {
+      "inputs": {
+        "igloo": [
+          "conformist",
+          "purse-first",
+          "igloo"
+        ],
+        "nixpkgs-master": [
+          "conformist",
+          "purse-first",
+          "nixpkgs-master"
+        ],
+        "utils": [
+          "conformist",
+          "purse-first",
+          "utils"
+        ]
+      },
+      "locked": {
+        "lastModified": 1780578823,
+        "narHash": "sha256-fYpYfjnpvcQ1/byC6UisbYc5boGxbH0gj0jyJfUDhOI=",
+        "owner": "amarbel-llc",
+        "repo": "conformist",
+        "rev": "e7a3240c6fe46caec85c4966b011f784e1846637",
+        "type": "github"
+      },
+      "original": {
+        "owner": "amarbel-llc",
+        "repo": "conformist",
+        "type": "github"
+      }
+    },
     "flake-parts": {
       "inputs": {
         "nixpkgs-lib": [
@@ -81,6 +140,33 @@
         "type": "github"
       }
     },
+    "gomod2nix": {
+      "inputs": {
+        "flake-utils": [
+          "conformist",
+          "purse-first",
+          "utils"
+        ],
+        "nixpkgs-master": [
+          "conformist",
+          "purse-first",
+          "nixpkgs-master"
+        ]
+      },
+      "locked": {
+        "lastModified": 1779583462,
+        "narHash": "sha256-E32c2DtK6w8oJ00RplIgXqY2c4UVobZVTxaLRIbXhEE=",
+        "owner": "amarbel-llc",
+        "repo": "gomod2nix",
+        "rev": "2ae99ee109b3214305f098a4ebccd91b323a86b2",
+        "type": "github"
+      },
+      "original": {
+        "owner": "amarbel-llc",
+        "repo": "gomod2nix",
+        "type": "github"
+      }
+    },
     "igloo": {
       "inputs": {
         "bun2nix": "bun2nix",
@@ -90,11 +176,11 @@
         "treefmt-nix": "treefmt-nix_2"
       },
       "locked": {
-        "lastModified": 1780312715,
-        "narHash": "sha256-Tpqr/wDSUu0EL2FxD6r4sPvhwNwkpSYShZA+K5+ZZKo=",
+        "lastModified": 1780780206,
+        "narHash": "sha256-uU107bTlgqxHx78hoP8DekwS/IQKNJXVycDrr5xPI+E=",
         "owner": "amarbel-llc",
         "repo": "igloo",
-        "rev": "e86e485a9c9c497312e4c15661df550d84e7ffbc",
+        "rev": "08c13d8b6a4cd35b3bd3f8c37f261989bbee8c57",
         "type": "github"
       },
       "original": {
@@ -135,9 +221,41 @@
         "type": "github"
       }
     },
+    "purse-first": {
+      "inputs": {
+        "conformist": "conformist_2",
+        "gomod2nix": "gomod2nix",
+        "igloo": [
+          "conformist",
+          "igloo"
+        ],
+        "nixpkgs-master": [
+          "conformist",
+          "nixpkgs-master"
+        ],
+        "utils": [
+          "conformist",
+          "utils"
+        ]
+      },
+      "locked": {
+        "lastModified": 1780797655,
+        "narHash": "sha256-OMrT14KCj/lzsP04gtKzSfQ84M/OC8HCQ7r3DPKU8uo=",
+        "owner": "amarbel-llc",
+        "repo": "purse-first",
+        "rev": "a5521b9f96fc5bdb753fa8bba053b79aa6f1a0ab",
+        "type": "github"
+      },
+      "original": {
+        "owner": "amarbel-llc",
+        "repo": "purse-first",
+        "type": "github"
+      }
+    },
     "root": {
       "inputs": {
         "bats": "bats",
+        "conformist": "conformist",
         "igloo": "igloo",
         "nixpkgs-master": "nixpkgs-master_2",
         "utils": "utils"

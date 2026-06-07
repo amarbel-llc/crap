@@ -46,14 +46,28 @@ and nix are unavailable in the dev container, so they were not verified here).
 ## Build & Test
 
 ``` sh
-just build          # nix build --show-trace (builds large-colon + rust-crap)
+just                # default: validate lint build test (the CI/merge gate)
+just build          # regenerate gomod2nix.toml + nix build --show-trace
 just test           # run all tests (Go + Rust)
 just test-go        # Go tests only (cd go-crap && go test ./...)
 just test-cargo     # Rust tests only (cargo test)
 
-just codemod-fmt    # format all code (Go + Rust + Nix)
+just lint-fmt       # read-only format/lint gate (conformist check)
+just codemod-fmt    # format all code via conformist (Go/Nix/Rust/shell)
 just run-nix <args> # run large-colon via nix run
+
+just release <ver>  # bump version.env, commit, tag go-crap/v<ver>, gh release
 ```
+
+Formatting/linting is driven by **conformist** (the treefmt successor);
+config lives in `./conformist.toml`, wired as the flake `formatter`
+(`nix fmt`) and gated by `just lint-fmt`.
+
+`version.env` (`CRAP_VERSION`) is the single version source of truth
+(eng-versioning(7)): flake.nix reads it for all three derivations, and the
+fork's `buildGoApplication` burns it into the Go binaries as
+`-X main.version` (commit from the flake rev). `:: version` /
+`crap-present --version` print `<version>+<commit>`.
 
 ## Architecture
 
@@ -99,7 +113,13 @@ rewriting.
 ## Nix Flake
 
 Uses the standard stable-first nixpkgs convention (see parent `eng` CLAUDE.md).
-DevShell combines Go, Rust, and shell devenvs.
+DevShell combines Go, Rust, and shell devenvs (Go via `mkGoEnv` +
+the `gomod2nix` CLI).
+
+The Go binaries build with the fork's `buildGoApplication` against
+`go-crap/gomod2nix.toml` (no vendoring; regenerate with
+`just build-gomod2nix` after dependency changes, or `just update-go` to
+tidy + regenerate).
 
 ## `::` Responsibility Model
 

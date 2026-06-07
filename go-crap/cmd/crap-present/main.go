@@ -11,11 +11,25 @@
 package main
 
 import (
+	"fmt"
 	"os"
 
 	"github.com/amarbel-llc/crap/go-crap/presentcli"
 )
 
+// version and commit are injected at release build time by the
+// amarbel-llc/nixpkgs fork's buildGoApplication (-X main.version from
+// version.env, -X main.commit from the flake rev). A plain `go build`
+// reports "dev"/"unknown" — the intended dev behavior.
+var (
+	version = "dev"
+	commit  = "unknown"
+)
+
 func main() {
+	if len(os.Args) > 1 && (os.Args[1] == "version" || os.Args[1] == "--version" || os.Args[1] == "-v") {
+		fmt.Printf("crap-present %s+%s\n", version, commit)
+		os.Exit(0)
+	}
 	os.Exit(presentcli.Run(os.Args[1:], os.Stdin, os.Stderr))
 }

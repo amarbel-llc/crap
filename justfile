@@ -1,6 +1,33 @@
-default: build test
+default: validate lint build test
 
-build: lint-vendor build-nix
+validate: validate-devshell
+
+# Verify the devShell evaluates and builds without errors. Catches
+# mkGoEnv / gomod2nix.toml breakage that the prod-binary build can mask.
+# Uses builtins.currentSystem (not a hardcoded system) because CI also
+# runs aarch64-darwin. No store-output usage --- just a build-check.
+validate-devshell:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    system=$(nix eval --raw --impure --expr 'builtins.currentSystem')
+    nix build --no-link ".#devShells.${system}.default"
+
+lint: lint-fmt
+
+# Read-only format + lint gate via conformist (the treefmt successor).
+# Fails on formatter drift (Go/Nix/Rust/shell, per ./conformist.toml)
+# plus shellcheck. `just codemod-fmt` is the write mode. Folded into
+# `just lint` → `just default`, so CI and the pre-merge hook enforce
+# fmt-cleanliness on every merge.
+lint-fmt:
+    nix develop --command conformist check
+
+build: build-gomod2nix build-nix
+
+# Regenerate go-crap/gomod2nix.toml from go.mod/go.sum so the nix build
+# resolves the same module set the worktree sees.
+build-gomod2nix:
+    nix develop --command gomod2nix --dir go-crap
 
 build-nix:
     nix build --show-trace
@@ -16,37 +43,85 @@ test-cargo:
 run-nix *ARGS:
     nix run . -- {{ARGS}}
 
-codemod-fmt: codemod-fmt-go codemod-fmt-rust codemod-fmt-nix
+codemod-fmt: codemod-fmt-conformist
 
-codemod-fmt-go:
-    nix develop --command gofumpt -w .
-
-codemod-fmt-rust:
-    nix develop --command cargo fmt --manifest-path rust-crap/Cargo.toml
-
-codemod-fmt-nix:
-    nix run github:amarbel-llc/purse-first?dir=devenvs/nix#fmt -- .
-
-lint-vendor:
-    #!/usr/bin/env sh
-    set -e
-    if [ -d go-crap/vendor ] && grep -q 'vendorHash = "sha256-' flake.nix; then
-        echo "FAIL: go-crap/vendor/ exists but flake.nix has a non-null vendorHash"
-        echo "Set vendorHash = null; for all Go packages"
-        exit 1
-    fi
-    if [ ! -d go-crap/vendor ] && grep -q 'vendorHash = null;' flake.nix; then
-        echo "FAIL: go-crap/vendor/ missing but flake.nix has vendorHash = null"
-        echo "Run 'go mod vendor' or set vendorHash to the correct hash"
-        exit 1
-    fi
+# Format all source files via conformist (the treefmt successor): Go
+# (goimports → gofumpt), Nix (nixfmt), Rust (rustfmt), shell (shfmt).
+# Config lives in ./conformist.toml. The read-only counterpart is
+# `lint-fmt`.
+codemod-fmt-conformist:
+    nix develop --command conformist
 
 update: update-nix
 
 update-nix:
     nix flake update
 
+# Tidy the Go module, then regenerate gomod2nix.toml to match.
+update-go: && build-gomod2nix
+    cd go-crap && nix develop ../ --command go mod tidy
+
 clean: clean-build
 
 clean-build:
     rm -rf result build/
+
+# Rewrite the CRAP_VERSION line in version.env (the single version
+# source of truth). Pure mutation: staging and committing is
+# `release`'s responsibility. Usage: just bump-version 0.1.1
+[group("maintenance")]
+bump-version new_version:
+    sed -E -i "s/^(export CRAP_VERSION)=.*/\\1={{new_version}}/" version.env
+
+# Sign and push a go-crap/v<version> tag for the version currently in
+# version.env. The go-crap/ tag prefix is required by the Go module
+# proxy for sub-directory modules. The $message env-param form avoids
+# {{ }} splicing a changelog with backticks into the script.
+[group("maintenance")]
+tag $message:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    . ./version.env
+    tag="go-crap/v${CRAP_VERSION:?missing CRAP_VERSION in version.env}"
+    git tag -s -m "$message" "$tag"
+    gum log --level info "Created tag: $tag"
+    git push origin "$tag"
+    gum log --level info "Pushed $tag"
+    git tag -v "$tag"
+
+# Cut a release from master: changelog from commits since the last
+# go-crap/v* tag (unscoped --- crap is polyglot with one repo-wide
+# version), bump version.env, commit, tag, and create the GitHub
+# release. Usage: just release 0.1.1
+[group("maintenance")]
+release new_version:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    branch=$(git rev-parse --abbrev-ref HEAD)
+    if [[ "$branch" != "master" ]]; then
+        gum log --level error "release only allowed from master (on '$branch')"
+        exit 1
+    fi
+
+    prev=$(git tag --sort=-v:refname -l "go-crap/v*" | head -1)
+    header="release go-crap/v{{new_version}}"
+    if [[ -n "$prev" ]]; then
+        summary=$(git log --format='- %s' "$prev"..HEAD)
+        if [[ -n "$summary" ]]; then
+            msg="$header"$'\n\n'"$summary"
+        else
+            msg="$header"
+        fi
+    else
+        msg="$header"
+    fi
+
+    just bump-version "{{new_version}}"
+    git add version.env
+    git commit -m "$header"
+    git push origin master
+
+    just tag "$msg"
+
+    gh release create "go-crap/v{{new_version}}" --title "$header" --notes "$msg"

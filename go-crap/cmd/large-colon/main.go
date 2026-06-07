@@ -22,6 +22,15 @@ import (
 	"github.com/amarbel-llc/crap/go-crap/ndjsoncrap"
 )
 
+// version and commit are injected at release build time by the
+// amarbel-llc/nixpkgs fork's buildGoApplication (-X main.version from
+// version.env, -X main.commit from the flake rev). A plain `go build`
+// reports "dev"/"unknown" — the intended dev behavior.
+var (
+	version = "dev"
+	commit  = "unknown"
+)
+
 func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
@@ -42,6 +51,8 @@ func main() {
 		os.Exit(handleExec(ctx, os.Args[2:]))
 	case "validate":
 		os.Exit(handleValidate())
+	case "version", "--version", "-v":
+		fmt.Printf(":: %s+%s\n", version, commit)
 	case "help", "-h", "--help":
 		printUsage()
 	default:
@@ -59,6 +70,7 @@ func printUsage() {
 	fmt.Fprintf(os.Stderr, "  :: cargo-test [args...]   Run `cargo test` and emit ndjson-crap\n")
 	fmt.Fprintf(os.Stderr, "  :: exec <cmd> [args...]   Run a command and emit ndjson-crap (execution records)\n")
 	fmt.Fprintf(os.Stderr, "  :: validate               Validate an ndjson-crap stream on stdin\n")
+	fmt.Fprintf(os.Stderr, "  :: version                Print version and commit\n")
 }
 
 // handlePresent delegates to the standalone crap-present binary. The

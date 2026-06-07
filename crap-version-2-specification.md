@@ -41,8 +41,10 @@ CRAP-2 has two representations:
 * **the CRAP-2 text profile** — the *legacy* line-oriented rendering
   described in the bulk of this document (the `CRAP-2` version line, `1::N`
   plan, `ok`/`not ok` test points, YAML diagnostics, indented subtests). It
-  remains a valid presentation and is still produced by existing crappy
-  utilities, but it is no longer the canonical interchange format.
+  is retained here as an optional, human-readable rendering and TAP-13
+  interchange target; the reference implementations no longer emit it, and it
+  is not the canonical interchange format. It maps onto ndjson-crap
+  record-for-record (see below).
 
 The *canonical human presentation* of a CRAP-2 stream is the **viewport**: a
 live spinner + rolling output tail + progress region that persists one
@@ -91,16 +93,15 @@ are covered in much more detail below.
 ## CRAP-2 Text Profile (legacy)
 
 > The line-oriented format described from here on is the **legacy text
-> presentation profile**. It remains normative *for that profile*, and is
-> still produced and consumed by existing crappy utilities, but **ndjson-crap**
-> (see [`docs/ndjson-crap-schema.md`](docs/ndjson-crap-schema.md)) is the
-> canonical wire format for CRAP-2 and the **viewport** is its canonical
-> presenter. New producers SHOULD emit ndjson-crap and let the viewport (or a
-> text-profile renderer) handle display; the text profile maps onto
-> ndjson-crap record-for-record (a `1::N` plan ↔ a `plan` record, an
-> `ok`/`not ok` line ↔ a `test` record, a YAML block ↔ a test record's
-> `diagnostic`, an Output Block ↔ a test record's `output`, `Bail out!` ↔ a
-> `bailout` record).
+> presentation profile**. It remains normative *for that profile* and is a
+> valid human-readable / TAP-13-interchange rendering, but the reference
+> implementations no longer emit it: **ndjson-crap** (see
+> [`docs/ndjson-crap-schema.md`](docs/ndjson-crap-schema.md)) is the canonical
+> wire format for CRAP-2 and the **viewport** is its canonical presenter.
+> Producers emit ndjson-crap. The text profile maps onto ndjson-crap
+> record-for-record (a `1::N` plan ↔ a `plan` record, an `ok`/`not ok` line ↔
+> a `test` record, a YAML block ↔ a test record's `diagnostic`, an Output
+> Block ↔ a test record's `output`, `Bail out!` ↔ a `bailout` record).
 
 CRAP-2's general text-profile grammar is:
 

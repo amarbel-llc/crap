@@ -68,6 +68,10 @@ config lives in `./conformist.toml`, wired as the flake `formatter`
 fork's `buildGoApplication` burns it into the Go binaries as
 `-X main.version` (commit from the flake rev). `:: version` /
 `crap-present --version` print `<version>+<commit>`.
+`rust-crap/Cargo.toml`'s `package.version` must mirror it:
+`rust-crap/build.rs` fails the build on drift (in nix the authoritative
+version arrives via the `CRAP_VERSION` env attr), and `just bump-version`
+rewrites version.env, Cargo.toml, and Cargo.lock together.
 
 ## Architecture
 

@@ -67,11 +67,16 @@ clean-build:
     rm -rf result build/
 
 # Rewrite the CRAP_VERSION line in version.env (the single version
-# source of truth). Pure mutation: staging and committing is
-# `release`'s responsibility. Usage: just bump-version 0.1.1
+# source of truth) and resync rust-crap/Cargo.toml's package.version,
+# which must mirror it (rust-crap/build.rs fails the build on drift —
+# Cargo.toml's version field is mandatory and can't read version.env
+# itself; see amarbel-llc/eng#162). Pure mutation: staging and
+# committing is `release`'s responsibility. Usage: just bump-version 0.1.1
 [group("maintenance")]
 bump-version new_version:
     sed -E -i "s/^(export CRAP_VERSION)=.*/\\1={{new_version}}/" version.env
+    sed -E -i "s/^version = \".*\"/version = \"{{new_version}}\"/" rust-crap/Cargo.toml
+    sed -E -i '/^name = "rust-crap"$/,/^version = /s/^version = ".*"/version = "{{new_version}}"/' rust-crap/Cargo.lock
 
 # Sign and push a go-crap/v<version> tag for the version currently in
 # version.env. The go-crap/ tag prefix is required by the Go module
@@ -118,7 +123,7 @@ release new_version:
     fi
 
     just bump-version "{{new_version}}"
-    git add version.env
+    git add version.env rust-crap/Cargo.toml rust-crap/Cargo.lock
     git commit -m "$header"
     git push origin master
 

@@ -135,6 +135,11 @@
           version = crapVersion;
           src = ./rust-crap;
 
+          # build.rs guards Cargo.toml's version against version.env; the
+          # nix src is the rust-crap/ subtree (no ../version.env), so the
+          # authoritative version arrives via this env var instead.
+          CRAP_VERSION = crapVersion;
+
           cargoLock.lockFile = ./rust-crap/Cargo.lock;
 
           meta = {

@@ -32,6 +32,19 @@
         };
         pkgs-master = import nixpkgs-master { inherit system; };
 
+        # Producer side of the flake-input-go_mod protocol (RFC 0001):
+        # exposes the go-crap module's source tree as `go-pkgs` so sibling
+        # flakes (e.g. cutting-garden) can bridge it via goFlakeInputs
+        # instead of fetching a published version. crap is polyglot, so the
+        # module manifests are anchored under go-crap/.
+        goPkgs = pkgs.mkGoPkgs {
+          src = self;
+          extras = [
+            "^go-crap/go\\.mod$"
+            "^go-crap/go\\.sum$"
+          ];
+        };
+
         large-colon = pkgs-master.buildGoModule.override { go = pkgs-master.go_1_26; } {
           pname = "large-colon";
           version = "0.1.0";
@@ -52,55 +65,15 @@
           };
         };
 
-        crappy-git = pkgs-master.buildGoModule.override { go = pkgs-master.go_1_26; } {
-          pname = "crappy-git";
+        crap-present = pkgs-master.buildGoModule.override { go = pkgs-master.go_1_26; } {
+          pname = "crap-present";
           version = "0.1.0";
           src = ./go-crap;
-          subPackages = [ "cmd/crappy-git" ];
+          subPackages = [ "cmd/crap-present" ];
           vendorHash = null;
 
-          postInstall = ''
-            mv $out/bin/crappy-git "$out/bin/::git"
-          '';
-
           meta = {
-            description = "Git wrapper that emits CRAP-2 output";
-            homepage = "https://github.com/amarbel-llc/crap";
-            license = pkgs.lib.licenses.mit;
-          };
-        };
-
-        crappy-brew = pkgs-master.buildGoModule.override { go = pkgs-master.go_1_26; } {
-          pname = "crappy-brew";
-          version = "0.1.0";
-          src = ./go-crap;
-          subPackages = [ "cmd/crappy-brew" ];
-          vendorHash = null;
-
-          postInstall = ''
-            mv $out/bin/crappy-brew "$out/bin/::brew"
-          '';
-
-          meta = {
-            description = "Brew wrapper that emits CRAP-2 output";
-            homepage = "https://github.com/amarbel-llc/crap";
-            license = pkgs.lib.licenses.mit;
-          };
-        };
-
-        crappy-direnv = pkgs-master.buildGoModule.override { go = pkgs-master.go_1_26; } {
-          pname = "crappy-direnv";
-          version = "0.1.0";
-          src = ./go-crap;
-          subPackages = [ "cmd/crappy-direnv" ];
-          vendorHash = null;
-
-          postInstall = ''
-            mv $out/bin/crappy-direnv "$out/bin/::direnv"
-          '';
-
-          meta = {
-            description = "Direnv wrapper that emits CRAP-2 output";
+            description = "ndjson-crap viewport presenter (standalone)";
             homepage = "https://github.com/amarbel-llc/crap";
             license = pkgs.lib.licenses.mit;
           };
@@ -126,18 +99,16 @@
             name = "crap";
             paths = [
               large-colon
-              crappy-git
-              crappy-brew
-              crappy-direnv
+              crap-present
             ];
           };
           inherit
             large-colon
-            crappy-git
-            crappy-brew
-            crappy-direnv
+            crap-present
             rust-crap
             ;
+          # go-crap module source for sibling-flake consumers (RFC 0001).
+          inherit (goPkgs) go-pkgs;
         };
 
         devShells.default = pkgs.mkShell {

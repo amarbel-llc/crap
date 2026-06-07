@@ -1,369 +1,173 @@
+// Command large-colon (invoked as `::`) is the CRAP-2 toolkit. Every
+// subcommand is an ndjson-crap producer that writes the canonical wire
+// format (see go-crap/ndjsoncrap) to stdout; presentation is the viewport's
+// job via `:: present` / the crap-present binary:
+//
+//	:: go-test ./... | crap-present
+//	:: go-test ./... | ::  present     # equivalent
 package main
 
 import (
-	"bytes"
+	"bufio"
 	"context"
-	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"os/signal"
-	"strconv"
-	"strings"
+	"path/filepath"
 
 	crap "github.com/amarbel-llc/crap/go-crap"
+	"github.com/amarbel-llc/crap/go-crap/ndjsoncrap"
 )
 
 func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
+	// No subcommand: read ndjson-crap on stdin and present it.
 	if len(os.Args) < 2 {
-		crap.ReformatTAP(os.Stdin, os.Stdout, stdoutIsTerminal())
-		return
+		os.Exit(handlePresent(ctx, nil))
 	}
 
-	var err error
 	switch os.Args[1] {
-	case "validate":
-		err = handleValidate()
+	case "present", "reformat":
+		os.Exit(handlePresent(ctx, os.Args[2:]))
 	case "go-test":
-		err = handleGoTest(ctx)
+		os.Exit(handleGoTest(ctx, os.Args[2:]))
 	case "cargo-test":
-		err = handleCargoTest(ctx)
-	case "reformat":
-		err = handleReformat()
+		os.Exit(handleCargoTest(ctx, os.Args[2:]))
 	case "exec":
-		err = handleExec(ctx)
-	case "exec-parallel":
-		err = handleExecParallel(ctx)
+		os.Exit(handleExec(ctx, os.Args[2:]))
+	case "validate":
+		os.Exit(handleValidate())
 	case "help", "-h", "--help":
 		printUsage()
 	default:
-		args := os.Args[1:]
-		var noSpinner string
-		rest := parseFlags(args, map[string]*string{
-			"--no-spinner": &noSpinner,
-		}, nil)
-		if len(rest) == 0 {
-			fmt.Fprintf(os.Stderr, "error: missing command\n")
-			os.Exit(1)
-		}
-		command := rest[0]
-		cmdArgs := rest[1:]
-		color := stdoutIsTerminal()
-		exitCode := crap.RunWithPTYReformat(ctx, command, cmdArgs, os.Stdout, color, crap.WithSpinner(noSpinner != "true"))
-		if exitCode != 0 {
-			os.Exit(exitCode)
-		}
-	}
-
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		os.Exit(1)
+		fmt.Fprintf(os.Stderr, "error: unknown command %q (try `:: help`)\n", os.Args[1])
+		os.Exit(64)
 	}
 }
 
 func printUsage() {
-	fmt.Fprintf(os.Stderr, ":: — CRAP-2 toolkit\n\n")
+	fmt.Fprintf(os.Stderr, ":: — CRAP-2 toolkit (ndjson-crap producers + viewport)\n\n")
 	fmt.Fprintf(os.Stderr, "Usage:\n")
-	fmt.Fprintf(os.Stderr, "  ::                        Read CRAP from stdin and emit CRAP-2\n")
-	fmt.Fprintf(os.Stderr, "  :: <cmd> [args...]         Run cmd in a PTY and reformat as CRAP-2\n")
-	fmt.Fprintf(os.Stderr, "  :: reformat               Read CRAP from stdin and emit CRAP-2\n")
-	fmt.Fprintf(os.Stderr, "  :: validate [flags]       Validate CRAP-2 input\n")
-	fmt.Fprintf(os.Stderr, "  :: go-test [args...]      Run go test and convert to CRAP-2\n")
-	fmt.Fprintf(os.Stderr, "  :: cargo-test [args...]   Run cargo test and convert to CRAP-2\n")
-	fmt.Fprintf(os.Stderr, "  :: exec <cmd> [args...]   Run cmd sequentially and emit CRAP-2\n")
-	fmt.Fprintf(os.Stderr, "  :: exec-parallel          Run commands in parallel and emit CRAP-2\n")
+	fmt.Fprintf(os.Stderr, "  ::                        Read ndjson-crap on stdin and render via the viewport\n")
+	fmt.Fprintf(os.Stderr, "  :: present [flags]        Same as above (also: reformat)\n")
+	fmt.Fprintf(os.Stderr, "  :: go-test [args...]      Run `go test -json` and emit ndjson-crap\n")
+	fmt.Fprintf(os.Stderr, "  :: cargo-test [args...]   Run `cargo test` and emit ndjson-crap\n")
+	fmt.Fprintf(os.Stderr, "  :: exec <cmd> [args...]   Run a command and emit ndjson-crap (execution records)\n")
+	fmt.Fprintf(os.Stderr, "  :: validate               Validate an ndjson-crap stream on stdin\n")
 }
 
-func stdoutIsTerminal() bool {
-	if os.Getenv("NO_COLOR") != "" {
-		return false
-	}
-	stat, err := os.Stdout.Stat()
+// handlePresent delegates to the standalone crap-present binary. The
+// presenter pulls in bubbletea, whose init() probes the terminal (OSC 11)
+// for any process that imports it; keeping that out of the general-purpose
+// `::` binary means delegating rather than importing. crap-present is
+// resolved from PATH or alongside this executable (they ship together).
+func handlePresent(ctx context.Context, args []string) int {
+	bin, err := resolvePresentBin()
 	if err != nil {
-		return false
+		fmt.Fprintf(os.Stderr, "present: %v\n", err)
+		return 1
 	}
-	return (stat.Mode() & os.ModeCharDevice) != 0
-}
-
-func parseFlags(args []string, boolFlags, valueFlags map[string]*string) []string {
-	var rest []string
-	for i := 0; i < len(args); i++ {
-		a := args[i]
-		if ptr, ok := boolFlags[a]; ok {
-			*ptr = "true"
-			continue
-		}
-		if ptr, ok := valueFlags[a]; ok && i+1 < len(args) {
-			i++
-			*ptr = args[i]
-			continue
-		}
-		rest = append(rest, a)
-	}
-	return rest
-}
-
-func handleValidate() error {
-	args := os.Args[2:]
-	var format, strict, inputFlag string
-	rest := parseFlags(args, map[string]*string{
-		"--strict": &strict,
-	}, map[string]*string{
-		"--format": &format,
-		"--input":  &inputFlag,
-	})
-	_ = rest
-
-	if format == "" {
-		format = "text"
-	}
-	switch format {
-	case "text", "json", "tap":
-	default:
-		return fmt.Errorf("invalid format: %s (must be text, json, or tap)", format)
-	}
-
-	var input io.Reader
-	if inputFlag != "" {
-		input = strings.NewReader(inputFlag)
-	} else {
-		input = os.Stdin
-	}
-
-	reader := crap.NewReader(input)
-	diags := reader.Diagnostics()
-	summary := reader.Summary()
-
-	switch format {
-	case "json":
-		result := map[string]any{
-			"summary":     summary,
-			"diagnostics": diags,
-		}
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(result)
-
-	case "tap":
-		tw := crap.NewWriter(os.Stdout)
-		for _, d := range diags {
-			desc := fmt.Sprintf("[%s] %s", d.Rule, d.Message)
-			if d.Severity == crap.SeverityError {
-				tw.NotOk(desc, map[string]string{
-					"line":     fmt.Sprintf("%d", d.Line),
-					"severity": d.Severity.String(),
-					"rule":     d.Rule,
-				})
-			} else {
-				tw.Ok(desc)
-			}
-		}
-		if summary.Valid {
-			tw.Ok(fmt.Sprintf("CRAP stream valid: %d tests", summary.TotalTests))
-		} else {
-			tw.NotOk(fmt.Sprintf("CRAP stream invalid: %d tests", summary.TotalTests), map[string]string{
-				"passed":  fmt.Sprintf("%d", summary.Passed),
-				"failed":  fmt.Sprintf("%d", summary.Failed),
-				"skipped": fmt.Sprintf("%d", summary.Skipped),
-				"todo":    fmt.Sprintf("%d", summary.Todo),
-			})
-		}
-		tw.Plan()
-		if strict == "true" && !summary.Valid {
-			os.Exit(1)
-		}
-
-	default:
-		for _, d := range diags {
-			fmt.Printf("line %d: %s: [%s] %s\n", d.Line, d.Severity, d.Rule, d.Message)
-		}
-		status := "valid"
-		if !summary.Valid {
-			status = "invalid"
-		}
-		fmt.Printf("\n%s: %d tests (%d passed, %d failed, %d skipped, %d todo)\n",
-			status, summary.TotalTests, summary.Passed, summary.Failed, summary.Skipped, summary.Todo)
-		if strict == "true" && !summary.Valid {
-			os.Exit(1)
-		}
-	}
-
-	return nil
-}
-
-func handleGoTest(ctx context.Context) error {
-	args := os.Args[2:]
-	var verbose, skipEmpty string
-	rest := parseFlags(args, map[string]*string{
-		"-v": &verbose, "--verbose": &verbose,
-		"--skip-empty": &skipEmpty,
-	}, nil)
-
-	goTestArgs := []string{"test", "-json"}
-	if verbose == "true" {
-		goTestArgs = append(goTestArgs, "-v")
-	}
-	goTestArgs = append(goTestArgs, rest...)
-
-	cmd := exec.CommandContext(ctx, "go", goTestArgs...)
+	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return fmt.Errorf("creating stdout pipe: %w", err)
+	if err := cmd.Run(); err != nil {
+		var ee *exec.ExitError
+		if errors.As(err, &ee) {
+			return ee.ExitCode()
+		}
+		fmt.Fprintf(os.Stderr, "present: %v\n", err)
+		return 1
 	}
-
-	color := stdoutIsTerminal()
-
-	if err := cmd.Start(); err != nil {
-		tw := crap.NewColorWriter(os.Stdout, color)
-		tw.BailOut(fmt.Sprintf("failed to start go test: %v", err))
-		return err
-	}
-
-	exitCode := crap.ConvertGoTest(stdout, os.Stdout, verbose == "true", skipEmpty == "true", color)
-	cmd.Wait()
-
-	if exitCode != 0 {
-		os.Exit(exitCode)
-	}
-	return nil
+	return 0
 }
 
-func handleCargoTest(ctx context.Context) error {
-	args := os.Args[2:]
-	var verbose, skipEmpty string
-	rest := parseFlags(args, map[string]*string{
-		"-v": &verbose, "--verbose": &verbose,
-		"--skip-empty": &skipEmpty,
-	}, nil)
-
-	cargoArgs := []string{"test"}
-	if verbose == "true" {
-		cargoArgs = append(cargoArgs, "-v")
+func resolvePresentBin() (string, error) {
+	if p, err := exec.LookPath("crap-present"); err == nil {
+		return p, nil
 	}
-	cargoArgs = append(cargoArgs, rest...)
+	if exe, err := os.Executable(); err == nil {
+		cand := filepath.Join(filepath.Dir(exe), "crap-present")
+		if st, statErr := os.Stat(cand); statErr == nil && !st.IsDir() {
+			return cand, nil
+		}
+	}
+	return "", fmt.Errorf("crap-present not found on PATH or alongside %s", filepath.Base(os.Args[0]))
+}
 
+func handleGoTest(ctx context.Context, args []string) int {
+	goArgs := append([]string{"test", "-json"}, args...)
+	cmd := exec.CommandContext(ctx, "go", goArgs...)
+	cmd.Stderr = os.Stderr
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return bailout(os.Stdout, fmt.Sprintf("creating stdout pipe: %v", err))
+	}
+	if err := cmd.Start(); err != nil {
+		return bailout(os.Stdout, fmt.Sprintf("failed to start go test: %v", err))
+	}
+	code := crap.ConvertGoTest(stdout, os.Stdout)
+	_ = cmd.Wait()
+	return code
+}
+
+func handleCargoTest(ctx context.Context, args []string) int {
+	cargoArgs := append([]string{"test"}, args...)
 	cmd := exec.CommandContext(ctx, "cargo", cargoArgs...)
-	var stderrBuf bytes.Buffer
-	cmd.Stderr = &stderrBuf
-
+	cmd.Stderr = os.Stderr
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return fmt.Errorf("creating stdout pipe: %w", err)
+		return bailout(os.Stdout, fmt.Sprintf("creating stdout pipe: %v", err))
 	}
-
-	color := stdoutIsTerminal()
-
 	if err := cmd.Start(); err != nil {
-		tw := crap.NewColorWriter(os.Stdout, color)
-		tw.BailOut(fmt.Sprintf("failed to start cargo test: %v", err))
-		return err
+		return bailout(os.Stdout, fmt.Sprintf("failed to start cargo test: %v", err))
 	}
-
-	exitCode := crap.ConvertCargoTest(stdout, os.Stdout, verbose == "true", skipEmpty == "true", color)
-	cmdErr := cmd.Wait()
-
-	if cmdErr != nil && exitCode == 0 {
-		tw := crap.NewColorWriter(os.Stdout, color)
-		msg := strings.TrimSpace(stderrBuf.String())
-		if msg == "" {
-			msg = cmdErr.Error()
-		}
-		tw.BailOut(fmt.Sprintf("cargo test failed: %s", msg))
-		os.Exit(1)
-	}
-
-	if exitCode != 0 {
-		os.Exit(exitCode)
-	}
-	return nil
+	code := crap.ConvertCargoTest(stdout, os.Stdout)
+	_ = cmd.Wait()
+	return code
 }
 
-func handleReformat() error {
-	crap.ReformatTAP(os.Stdin, os.Stdout, stdoutIsTerminal())
-	return nil
+func handleExec(ctx context.Context, args []string) int {
+	if len(args) == 0 {
+		fmt.Fprintf(os.Stderr, "exec: missing command\n")
+		return 64
+	}
+	return crap.ConvertExec(ctx, args[0], args[1:], os.Stdout)
 }
 
-func handleExec(ctx context.Context) error {
-	args := os.Args[2:]
-	var verbose, noSpinner string
-	rest := parseFlags(args, map[string]*string{
-		"-v": &verbose, "--verbose": &verbose,
-		"--no-spinner": &noSpinner,
-	}, nil)
-
-	if len(rest) == 0 {
-		return fmt.Errorf("missing command\nusage: :: exec [--verbose] [--no-spinner] <cmd> [<arg1> <arg2> ...]")
-	}
-
-	utility := rest[0]
-	execArgs := rest[1:]
-	color := stdoutIsTerminal()
-	exitCode := crap.ConvertExec(ctx, utility, execArgs, os.Stdout, verbose == "true", color, crap.WithSpinner(noSpinner != "true"))
-
-	if exitCode != 0 {
-		os.Exit(exitCode)
-	}
-	return nil
-}
-
-func handleExecParallel(ctx context.Context) error {
-	args := os.Args[2:]
-	var verbose, noSpinner, jobsStr string
-	rest := parseFlags(args, map[string]*string{
-		"-v": &verbose, "--verbose": &verbose,
-		"--no-spinner": &noSpinner,
-	}, map[string]*string{
-		"-j": &jobsStr, "--jobs": &jobsStr,
-	})
-
-	maxJobs := 0
-	if jobsStr != "" {
-		if v, err := strconv.Atoi(jobsStr); err == nil {
-			maxJobs = v
-		}
-	}
-
-	sepIdx := -1
-	for i, a := range rest {
-		if a == ":::" {
-			sepIdx = i
+// handleValidate reads an ndjson-crap stream on stdin and reports any
+// undecodable records. Returns 0 when every record decodes, 1 otherwise.
+func handleValidate() int {
+	r := ndjsoncrap.NewReader(os.Stdin)
+	records, bad := 0, 0
+	for {
+		_, err := r.Next()
+		if err == io.EOF {
 			break
 		}
+		if err != nil {
+			bad++
+			fmt.Fprintf(os.Stderr, "invalid: %v\n", err)
+			continue
+		}
+		records++
 	}
-
-	if sepIdx < 0 {
-		return fmt.Errorf("missing ::: separator\nusage: :: exec-parallel [--verbose] <template> ::: <arg1> <arg2> ...")
+	out := bufio.NewWriter(os.Stdout)
+	defer out.Flush()
+	if bad == 0 {
+		fmt.Fprintf(out, "valid: %d record(s)\n", records)
+		return 0
 	}
-	if sepIdx == 0 {
-		return fmt.Errorf("missing command template before :::\nusage: :: exec-parallel [--verbose] <template> ::: <arg1> <arg2> ...")
-	}
+	fmt.Fprintf(out, "invalid: %d record(s) ok, %d undecodable\n", records, bad)
+	return 1
+}
 
-	template := strings.Join(rest[:sepIdx], " ")
-	execArgs := rest[sepIdx+1:]
-
-	if len(execArgs) == 0 {
-		return fmt.Errorf("no arguments after :::\nusage: :: exec-parallel [--verbose] <template> ::: <arg1> <arg2> ...")
-	}
-
-	color := stdoutIsTerminal()
-	executor := &crap.GoroutineExecutor{MaxJobs: maxJobs}
-
-	var exitCode int
-	if color {
-		exitCode = crap.ConvertExecParallelWithStatus(ctx, executor, template, execArgs, os.Stdout, verbose == "true", color, crap.WithSpinner(noSpinner != "true"))
-	} else {
-		results := executor.Run(ctx, template, execArgs)
-		exitCode = crap.ConvertExecParallel(results, os.Stdout, verbose == "true", color)
-	}
-
-	if exitCode != 0 {
-		os.Exit(exitCode)
-	}
-	return nil
+func bailout(w io.Writer, msg string) int {
+	_ = ndjsoncrap.NewWriter(w).Write(ndjsoncrap.Bailout{Message: msg})
+	return 2
 }

@@ -35,12 +35,13 @@ process that imports it, which must not happen for the general-purpose `::`
 subcommands. Keep `cmd/large-colon` free of bubbletea.
 
 The line-oriented CRAP-2 **text profile** (the `Writer`/`Reader` in `crap.go`
-/ `reader.go`) is now **retired** in go-crap — deleted, along with the
+/ `reader.go`) is now **retired** — deleted from go-crap (along with the
 PTY-reformat path, the awk fallbacks, and the `crappy-git`/`brew`/`direnv`
-wrappers. The Go converters now emit ndjson-crap. **rust-crap still carries
-the old text-profile `CrapWriter`** and the bats suites were removed; bringing
-Rust onto ndjson-crap (and re-adding ndjson-crap-oriented integration tests)
-is the remaining greenfield work — do not assume it is done.
+wrappers) and replaced in rust-crap (the old text-profile `CrapWriter` is gone;
+`NdjsonCrapWriter` emits ndjson-crap). Both the Go converters and the Rust
+library now emit ndjson-crap. The text-format bats suites were removed;
+re-adding ndjson-crap-oriented integration tests is the remaining work (bats
+and nix are unavailable in the dev container, so they were not verified here).
 
 ## Build & Test
 
@@ -83,8 +84,9 @@ around ndjson-crap + the viewport. Key packages/files:
 
 ### Rust library (`rust-crap/`)
 
-`CrapWriter` with builder pattern (`CrapWriterBuilder`), supporting color, ICU
-locale formatting, subtests, YAML diagnostics, status line, and streamed output.
+`NdjsonCrapWriter` --- a direct producer of result-family ndjson-crap (plan /
+test / bailout / summary), field-compatible with `tap-ndjson(7)`. Built on
+serde/serde_json; no color/locale/status-line (those are the viewport's job).
 Library only --- no binary.
 
 ### Specification

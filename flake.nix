@@ -66,60 +66,6 @@
           };
         };
 
-        crappy-git = pkgs-master.buildGoModule.override { go = pkgs-master.go_1_26; } {
-          pname = "crappy-git";
-          version = "0.1.0";
-          src = ./go-crap;
-          subPackages = [ "cmd/crappy-git" ];
-          vendorHash = null;
-
-          postInstall = ''
-            mv $out/bin/crappy-git "$out/bin/::git"
-          '';
-
-          meta = {
-            description = "Git wrapper that emits CRAP-2 output";
-            homepage = "https://github.com/amarbel-llc/crap";
-            license = pkgs.lib.licenses.mit;
-          };
-        };
-
-        crappy-brew = pkgs-master.buildGoModule.override { go = pkgs-master.go_1_26; } {
-          pname = "crappy-brew";
-          version = "0.1.0";
-          src = ./go-crap;
-          subPackages = [ "cmd/crappy-brew" ];
-          vendorHash = null;
-
-          postInstall = ''
-            mv $out/bin/crappy-brew "$out/bin/::brew"
-          '';
-
-          meta = {
-            description = "Brew wrapper that emits CRAP-2 output";
-            homepage = "https://github.com/amarbel-llc/crap";
-            license = pkgs.lib.licenses.mit;
-          };
-        };
-
-        crappy-direnv = pkgs-master.buildGoModule.override { go = pkgs-master.go_1_26; } {
-          pname = "crappy-direnv";
-          version = "0.1.0";
-          src = ./go-crap;
-          subPackages = [ "cmd/crappy-direnv" ];
-          vendorHash = null;
-
-          postInstall = ''
-            mv $out/bin/crappy-direnv "$out/bin/::direnv"
-          '';
-
-          meta = {
-            description = "Direnv wrapper that emits CRAP-2 output";
-            homepage = "https://github.com/amarbel-llc/crap";
-            license = pkgs.lib.licenses.mit;
-          };
-        };
-
         rust-crap = pkgs-master.rustPlatform.buildRustPackage {
           pname = "rust-crap";
           version = "0.1.0";
@@ -141,17 +87,11 @@
             paths = [
               large-colon
               crap-present
-              crappy-git
-              crappy-brew
-              crappy-direnv
             ];
           };
           inherit
             large-colon
             crap-present
-            crappy-git
-            crappy-brew
-            crappy-direnv
             rust-crap
             ;
         };

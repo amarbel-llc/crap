@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/amarbel-llc/crap/go-crap/ndjsoncrap"
 )
 
 type testEvent struct {
@@ -44,20 +46,15 @@ func parseFileLine(output string) (file string, line string) {
 	return "", ""
 }
 
-// ConvertGoTest reads go test -json events from r and writes CRAP-2 to w.
-// If verbose is true, passing tests include output diagnostics.
-// If skipEmpty is true, packages with no tests emit a SKIP directive instead of not ok.
-// If color is true, ok/not ok keywords are ANSI-colorized.
-// Returns an exit code: 0 for all pass, 1 for any failure, 2 for build errors.
-func ConvertGoTest(r io.Reader, w io.Writer, verbose bool, skipEmpty bool, color bool) int {
+// ConvertGoTest reads `go test -json` events from r and writes ndjson-crap to
+// w: one top-level test record per package, with the package's tests (and
+// their subtests) nested as subtest records. Returns an exit code: 0 when no
+// package failed, 1 otherwise.
+func ConvertGoTest(r io.Reader, w io.Writer) int {
 	dec := json.NewDecoder(r)
 
 	packages := make(map[string]*packageResult)
 	var packageOrder []string
-
-	tw := NewColorWriter(w, color)
-	tw.streamedOutput = true
-	exitCode := 0
 
 	for {
 		var ev testEvent
@@ -65,129 +62,84 @@ func ConvertGoTest(r io.Reader, w io.Writer, verbose bool, skipEmpty bool, color
 			if err == io.EOF {
 				break
 			}
-			tw.Comment(fmt.Sprintf("unparseable: %v", err))
+			// Skip unparseable lines; go test sometimes interleaves plain text.
 			continue
 		}
 
 		pkg := packages[ev.Package]
 		if pkg == nil {
-			pkg = &packageResult{
-				name:    ev.Package,
-				testMap: make(map[string]*testResult),
-			}
+			pkg = &packageResult{name: ev.Package, testMap: make(map[string]*testResult)}
 			packages[ev.Package] = pkg
 			packageOrder = append(packageOrder, ev.Package)
 		}
 
 		if ev.Test == "" {
-			// Package-level event
 			switch ev.Action {
 			case "output":
 				pkg.output.WriteString(ev.Output)
-			case "pass":
+			case "pass", "skip":
 				pkg.elapsed = ev.Elapsed
-				if len(pkg.tests) == 0 {
-					emitEmptyPackage(tw, pkg, skipEmpty)
-					if !skipEmpty && exitCode < 1 {
-						exitCode = 1
-					}
-				} else {
-					emitPackage(tw, pkg, verbose)
-				}
 			case "fail":
 				pkg.failed = true
 				pkg.elapsed = ev.Elapsed
-				if len(pkg.tests) == 0 && skipEmpty {
-					emitEmptyPackage(tw, pkg, skipEmpty)
-				} else {
-					emitPackage(tw, pkg, verbose)
-					if exitCode < 1 {
-						exitCode = 1
-					}
-				}
-			case "skip":
-				pkg.elapsed = ev.Elapsed
-				emitEmptyPackage(tw, pkg, skipEmpty)
-				if !skipEmpty && exitCode < 1 {
-					exitCode = 1
-				}
 			}
 			continue
 		}
 
-		// Test-level event
 		tr := pkg.testMap[ev.Test]
 		if tr == nil {
 			tr = &testResult{name: ev.Test}
 			pkg.testMap[ev.Test] = tr
 			pkg.tests = append(pkg.tests, tr)
 		}
-
 		switch ev.Action {
 		case "output":
 			tr.output.WriteString(ev.Output)
-		case "pass":
-			tr.action = "pass"
-			tr.elapsed = ev.Elapsed
-		case "fail":
-			tr.action = "fail"
-			tr.elapsed = ev.Elapsed
-		case "skip":
-			tr.action = "skip"
+		case "pass", "fail", "skip":
+			tr.action = ev.Action
 			tr.elapsed = ev.Elapsed
 		}
 	}
 
-	tw.Plan()
+	exitCode := 0
+	var tops []ndjsoncrap.Test
+	for _, name := range packageOrder {
+		pkg := packages[name]
+		if len(pkg.tests) == 0 {
+			tops = append(tops, ndjsoncrap.Test{
+				Description: pkg.name,
+				OK:          true,
+				Directive:   skipDirective(emptyPackageReason(pkg.output.String())),
+			})
+			continue
+		}
+		var subs []ndjsoncrap.Test
+		for _, tr := range pkg.tests {
+			if strings.Contains(tr.name, "/") {
+				continue // nested under its parent
+			}
+			subs = append(subs, buildGoTest(pkg, tr, len(subs)+1))
+		}
+		if pkg.failed {
+			exitCode = 1
+		}
+		tops = append(tops, ndjsoncrap.Test{
+			Description: pkg.name,
+			OK:          !pkg.failed,
+			Subtest:     subs,
+		})
+	}
+
+	if err := writeResultStream(w, "go test", "go-test", tops); err != nil {
+		fmt.Fprintf(io.Discard, "%v", err) // emission errors are non-fatal to the run
+	}
 	return exitCode
 }
 
-func emitEmptyPackage(tw *Writer, pkg *packageResult, skipEmpty bool) {
-	if skipEmpty {
-		reason := emptyPackageReason(pkg.output.String())
-		tw.Skip(pkg.name, reason)
-	} else {
-		tw.NotOk(pkg.name, nil)
-	}
-}
-
-func emptyPackageReason(output string) string {
-	if strings.Contains(output, "[no test files]") {
-		return "no test files"
-	}
-	if strings.Contains(output, "no tests to run") {
-		return "no tests to run"
-	}
-	if strings.Contains(output, "[setup failed]") {
-		return "setup failed"
-	}
-	return "no tests"
-}
-
-func emitPackage(tapWriter *Writer, pkg *packageResult, verbose bool) {
-	subtest := tapWriter.Subtest(pkg.name)
-
-	for _, testResult := range pkg.tests {
-		// Skip subtests -- they are emitted by their parent
-		if strings.Contains(testResult.name, "/") {
-			continue
-		}
-
-		emitTest(subtest, pkg, testResult, verbose)
-	}
-
-	subtest.Plan()
-
-	if pkg.failed {
-		tapWriter.NotOk(pkg.name, nil)
-	} else {
-		tapWriter.Ok(pkg.name)
-	}
-}
-
-func emitTest(tapWriter *Writer, pkg *packageResult, testRezult *testResult, verbose bool) {
-	// Check for child subtests
-	prefix := testRezult.name + "/"
+// buildGoTest builds the ndjson-crap test record for one go test result,
+// recursing into "parent/child" subtests.
+func buildGoTest(pkg *packageResult, tr *testResult, n int) ndjsoncrap.Test {
+	prefix := tr.name + "/"
 	var children []*testResult
 	for _, child := range pkg.tests {
 		if strings.HasPrefix(child.name, prefix) && !strings.Contains(child.name[len(prefix):], "/") {
@@ -195,72 +147,58 @@ func emitTest(tapWriter *Writer, pkg *packageResult, testRezult *testResult, ver
 		}
 	}
 
+	display := tr.name
+	if idx := strings.LastIndex(display, "/"); idx >= 0 {
+		display = display[idx+1:]
+	}
+
 	if len(children) > 0 {
-		sub := tapWriter.Subtest(testRezult.name)
+		var subs []ndjsoncrap.Test
 		for _, child := range children {
-			emitTest(sub, pkg, child, verbose)
+			subs = append(subs, buildGoTest(pkg, child, len(subs)+1))
 		}
-		sub.Plan()
-		if testRezult.action == "fail" {
-			tapWriter.NotOk(testRezult.name, nil)
-		} else {
-			tapWriter.Ok(testRezult.name)
+		return ndjsoncrap.Test{
+			N:           n,
+			Description: display,
+			OK:          tr.action != "fail",
+			Subtest:     subs,
 		}
-		return
 	}
 
-	// Leaf test
-	name := testRezult.name
-	// For display, use just the last segment
-	if idx := strings.LastIndex(name, "/"); idx >= 0 {
-		name = testRezult.name[idx+1:]
-	}
-
-	output := cleanTestOutput(testRezult.output.String())
-
-	switch testRezult.action {
-	case "pass":
-		if verbose && output != "" {
-			ob := tapWriter.StartOutputBlock(name)
-			for _, line := range strings.Split(output, "\n") {
-				if line != "" {
-					ob.Line(line)
-				}
-			}
-			ob.Ok()
-		} else {
-			tapWriter.Ok(name)
-		}
-	case "fail":
-		if output != "" {
-			ob := tapWriter.StartOutputBlock(name)
-			for _, line := range strings.Split(output, "\n") {
-				if line != "" {
-					ob.Line(line)
-				}
-			}
-			diag := map[string]string{
-				"elapsed": fmt.Sprintf("%.3f", testRezult.elapsed),
-				"package": pkg.name,
-			}
-			file, line := parseFileLine(output)
-			if file != "" {
-				diag["file"] = file
-				diag["line"] = line
-			}
-			ob.NotOk(diag)
-		} else {
-			diag := map[string]string{
-				"elapsed": fmt.Sprintf("%.3f", testRezult.elapsed),
-				"package": pkg.name,
-			}
-			tapWriter.NotOk(name, diag)
-		}
+	output := cleanTestOutput(tr.output.String())
+	t := ndjsoncrap.Test{N: n, Description: display}
+	switch tr.action {
 	case "skip":
-		reason := extractSkipReason(output)
-		tapWriter.Skip(name, reason)
+		t.OK = true
+		t.Directive = skipDirective(extractSkipReason(output))
+	case "fail":
+		t.OK = false
+		t.Output = strPtr(output)
+		diag := map[string]any{
+			"elapsed": fmt.Sprintf("%.3f", tr.elapsed),
+			"package": pkg.name,
+		}
+		if file, line := parseFileLine(output); file != "" {
+			diag["file"] = file
+			diag["line"] = line
+		}
+		t.Diagnostic = diag
 	default:
-		tapWriter.Ok(name)
+		t.OK = true
+	}
+	return t
+}
+
+func emptyPackageReason(output string) string {
+	switch {
+	case strings.Contains(output, "[no test files]"):
+		return "no test files"
+	case strings.Contains(output, "no tests to run"):
+		return "no tests to run"
+	case strings.Contains(output, "[setup failed]"):
+		return "setup failed"
+	default:
+		return "no tests"
 	}
 }
 
@@ -268,18 +206,16 @@ func cleanTestOutput(raw string) string {
 	var lines []string
 	for _, line := range strings.Split(raw, "\n") {
 		trimmed := strings.TrimSpace(line)
-		// Skip go test framework lines
 		if strings.HasPrefix(trimmed, "=== RUN") ||
 			strings.HasPrefix(trimmed, "=== PAUSE") ||
 			strings.HasPrefix(trimmed, "=== CONT") ||
 			strings.HasPrefix(trimmed, "--- PASS") ||
 			strings.HasPrefix(trimmed, "--- FAIL") ||
 			strings.HasPrefix(trimmed, "--- SKIP") ||
-			trimmed == "PASS" || trimmed == "FAIL" ||
-			trimmed == "" {
+			trimmed == "PASS" || trimmed == "FAIL" || trimmed == "" {
 			continue
 		}
-		lines = append(lines, strings.TrimSpace(line))
+		lines = append(lines, trimmed)
 	}
 	return strings.Join(lines, "\n")
 }
@@ -287,15 +223,13 @@ func cleanTestOutput(raw string) string {
 func extractSkipReason(output string) string {
 	for _, line := range strings.Split(output, "\n") {
 		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "--- SKIP") {
+		if trimmed == "" || strings.HasPrefix(trimmed, "--- SKIP") ||
+			strings.HasPrefix(trimmed, "=== RUN") ||
+			strings.HasPrefix(trimmed, "=== PAUSE") ||
+			strings.HasPrefix(trimmed, "=== CONT") {
 			continue
 		}
-		if trimmed != "" &&
-			!strings.HasPrefix(trimmed, "=== RUN") &&
-			!strings.HasPrefix(trimmed, "=== PAUSE") &&
-			!strings.HasPrefix(trimmed, "=== CONT") {
-			return trimmed
-		}
+		return trimmed
 	}
 	return ""
 }

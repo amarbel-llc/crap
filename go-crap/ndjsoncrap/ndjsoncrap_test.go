@@ -42,6 +42,31 @@ func TestWriteTestEmitsNulls(t *testing.T) {
 	}
 }
 
+// Nested subtests must each carry "type":"test", and an empty summary
+// diagnostics list must serialize as [] (not null) to match tap-ndjson(7).
+func TestWriteStampsSubtestsAndSummaryArray(t *testing.T) {
+	var buf bytes.Buffer
+	w := NewWriter(&buf)
+	if err := w.Write(Test{N: 1, Description: "parent", OK: true, Subtest: []Test{
+		{N: 1, Description: "child", OK: true, Subtest: []Test{{N: 1, Description: "grandchild", OK: true}}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Write(Summary{Passed: 1, Total: 1, Valid: true}); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if strings.Contains(out, `"type":""`) {
+		t.Fatalf("subtest left an empty type:\n%s", out)
+	}
+	if c := strings.Count(out, `"type":"test"`); c != 3 {
+		t.Fatalf("want 3 test records stamped (parent+child+grandchild), got %d:\n%s", c, out)
+	}
+	if !strings.Contains(out, `"diagnostics":[]`) {
+		t.Fatalf("empty summary diagnostics must be [] not null:\n%s", out)
+	}
+}
+
 // just-us discriminators must normalize to the execution family.
 func TestDecodeJustEventsAliases(t *testing.T) {
 	cases := []struct {

@@ -35,10 +35,12 @@ process that imports it, which must not happen for the general-purpose `::`
 subcommands. Keep `cmd/large-colon` free of bubbletea.
 
 The line-oriented CRAP-2 **text profile** (the `Writer`/`Reader` in `crap.go`
-/ `reader.go`, mirrored by rust-crap and exercised by the bats suites) is now
-**legacy**. Retargeting the converters (`gotest`/`cargotest`/`execparallel`)
-to emit ndjson-crap and retiring the text core is a tracked, incremental
-migration — do not assume it is done.
+/ `reader.go`) is now **retired** in go-crap — deleted, along with the
+PTY-reformat path, the awk fallbacks, and the `crappy-git`/`brew`/`direnv`
+wrappers. The Go converters now emit ndjson-crap. **rust-crap still carries
+the old text-profile `CrapWriter`** and the bats suites were removed; bringing
+Rust onto ndjson-crap (and re-adding ndjson-crap-oriented integration tests)
+is the remaining greenfield work — do not assume it is done.
 
 ## Build & Test
 
@@ -57,20 +59,27 @@ just run-nix <args> # run large-colon via nix run
 ### Go library (`go-crap/`)
 
 The Go module (`github.com/amarbel-llc/crap/go-crap`) is both a library and the
-source for the `large-colon` CLI (binary name `::` in usage). Key files:
+source for the `large-colon` (`::`) and `crap-present` CLIs. It is built
+around ndjson-crap + the viewport. Key packages/files:
 
-- `crap.go` --- `Writer` type: core CRAP-2 stream writer with color, locale
-  formatting, subtests, streamed output, and status line support
-- `reader.go` --- `Reader` type: CRAP-2 parser producing diagnostics and summary
-- `parse.go` --- Low-level line parsing (plans, test points, directives)
-- `classify.go` --- Line classification for the parser
-- `diagnostic.go` --- Diagnostic types (severity, rules) for validation
-- `gotest.go` --- Converts `go test -json` output to CRAP-2
-- `cargotest.go` --- Converts `cargo test` output to CRAP-2
-- `reformat.go` --- Reads TAP/CRAP from stdin, emits colorized CRAP-2
-- `execparallel.go` --- Parallel command execution with CRAP-2 output
-- `cmd/large-colon/main.go` --- CLI entry point with subcommands: `validate`,
-  `go-test`, `cargo-test`, `reformat`, `exec`, `exec-parallel`
+- `ndjsoncrap/` --- the canonical ndjson-crap wire format: tolerant
+  `Reader`/`Writer` and the record types (`Meta`, `Plan`, `Test`, `Bailout`,
+  `Summary`, `NodeStart`, `Command`, `Output`, `NodeEnd`, `Unknown`).
+- `viewport/` --- the bubbletea presenter: `Model` + messages + a `Driver`
+  that turns ndjson-crap records into viewport messages, plus `Present()`
+  with a plain non-TTY fallback.
+- `presentcli/` --- shared CLI glue for the presenter.
+- `produce.go` --- the shared result-stream emitter (`writeResultStream` +
+  summary tally) for the ndjson-crap producers.
+- `gotest.go` / `cargotest.go` --- `ConvertGoTest` / `ConvertCargoTest`: turn
+  `go test -json` / `cargo test` output into ndjson-crap (packages/suites are
+  top-level test records; tests nest as subtests).
+- `exec.go` --- `ConvertExec`: run a command, emit execution-family records
+  (`node_start`/`output`/`node_end`).
+- `cmd/large-colon/main.go` --- the `::` CLI: producer subcommands (`go-test`,
+  `cargo-test`, `exec`, `validate`) plus `present`/`reformat`/no-args, which
+  delegate to `crap-present`.
+- `cmd/crap-present/main.go` --- the standalone viewport presenter.
 
 ### Rust library (`rust-crap/`)
 
@@ -92,30 +101,25 @@ DevShell combines Go, Rust, and shell devenvs.
 
 ## `::` Responsibility Model
 
-There are two presentation paths:
+`::` is a set of **ndjson-crap producers** plus a presenter. Every producer
+subcommand writes ndjson-crap to stdout; presentation is the viewport's job:
 
-- **`:: present`** (canonical) — the utility emits **ndjson-crap** and `::
-  present` (which delegates to `crap-present`) renders it via the viewport.
-  This is the path new producers should target.
-- **`:: <utility>` / `:: reformat`** (legacy text profile) — described below;
-  the utility emits TAP-14/CRAP text and `::` reformats it into the CRAP-2
-  text profile with improved UX.
+```sh
+:: go-test ./... | crap-present      # or: | :: present
+```
 
-`:: <utility>` expects the utility to emit **TAP-14** (or CRAP-2) on stdout.
-`::` reformats this into CRAP-2 with improved UX (colorization, status line,
-spinner). The responsibility for producing well-formed TAP belongs to the
-**utility**, not to `::`.
+- **Producers** (`go-test`, `cargo-test`, `exec`) run a tool and emit
+  ndjson-crap. A producer owns turning its tool's output into well-formed
+  records; the presenter never re-parses tool output.
+- **Presenter** (`:: present` / no-args / `reformat`) reads ndjson-crap on
+  stdin and renders it via the viewport. `::` delegates to the standalone
+  `crap-present` binary rather than importing the viewport, because
+  bubbletea's `init()` probes the terminal for any process that imports it
+  (keep `cmd/large-colon` bubbletea-free).
+- **`validate`** decodes an ndjson-crap stream and reports undecodable records.
 
-- **Utility emits TAP-14** → `::` reformats into CRAP-2 (happy path)
-- **Utility has no TAP support** → an awk fallback script in
-  `go-crap/awk/<tool>/` transforms tool-specific output into TAP, which `::`
-  then reformats
-- **No awk fallback exists** → `::` wraps the entire output as a single opaque
-  test point
-
-If a utility's output is not being reformatted correctly, the fix almost always
-belongs in the utility (or in a new awk fallback), **not** in `::` itself. Do
-not add heuristic TAP detection or line-scanning to `RunWithPTYReformat`.
+The old "wrap any tool, reformat its text output, awk fallback" model is gone;
+producers emit the canonical format directly.
 
 ## Key Conventions
 

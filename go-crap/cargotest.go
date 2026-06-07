@@ -6,13 +6,14 @@ import (
 	"io"
 	"regexp"
 	"strings"
+
+	"github.com/amarbel-llc/crap/go-crap/ndjsoncrap"
 )
 
 type cargoTestResult struct {
-	name    string
-	event   string // ok, failed, ignored
-	stdout  string
-	elapsed float64
+	name   string
+	event  string // ok, failed, ignored
+	stdout string
 }
 
 type cargoSuiteResult struct {
@@ -20,7 +21,6 @@ type cargoSuiteResult struct {
 	tests     []*cargoTestResult
 	testCount int
 	failed    bool
-	elapsed   float64
 }
 
 var rustFileLineRe = regexp.MustCompile(`([\w][\w_/]*\.rs):(\d+):`)
@@ -33,66 +33,61 @@ func parseRustFileLine(output string) (file string, line string) {
 	return "", ""
 }
 
-// Patterns for cargo test pretty output.
 var (
-	// "running 36 tests" or "running 0 tests" or "running 1 test"
-	runningTestsRe = regexp.MustCompile(`^running (\d+) tests?$`)
-	// "test tests::test_a ... ok" / "test tests::test_b ... FAILED" / "test tests::test_c ... ignored"
-	testResultRe = regexp.MustCompile(`^test (.+) \.\.\. (ok|FAILED|ignored)$`)
-	// "test result: ok. 36 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
-	testSummaryRe = regexp.MustCompile(`^test result: (ok|FAILED)\. (\d+) passed; (\d+) failed; (\d+) ignored;`)
-	// "---- tests::test_fail stdout ----"
+	runningTestsRe        = regexp.MustCompile(`^running (\d+) tests?$`)
+	testResultRe          = regexp.MustCompile(`^test (.+) \.\.\. (ok|FAILED|ignored)$`)
+	testSummaryRe         = regexp.MustCompile(`^test result: (ok|FAILED)\. (\d+) passed; (\d+) failed; (\d+) ignored;`)
 	failureStdoutHeaderRe = regexp.MustCompile(`^---- (.+) stdout ----$`)
 )
 
-// ConvertCargoTest reads cargo test pretty output from r and writes CRAP-2 to w.
-// If verbose is true, passing tests include output diagnostics.
-// If skipEmpty is true, suites with no tests emit a SKIP directive instead of not ok.
-// If color is true, ok/not ok keywords are ANSI-colorized.
-// Returns an exit code: 0 for all pass, 1 for any failure.
-func ConvertCargoTest(r io.Reader, w io.Writer, verbose bool, skipEmpty bool, color bool) int {
+// ConvertCargoTest reads `cargo test` pretty output from r and writes
+// ndjson-crap to w: one top-level test record per suite, with the suite's
+// tests nested as subtest records. Returns an exit code: 0 when no suite
+// failed, 1 otherwise.
+func ConvertCargoTest(r io.Reader, w io.Writer) int {
 	scanner := bufio.NewScanner(r)
-	tw := NewColorWriter(w, color)
-	tw.streamedOutput = true
-	exitCode := 0
 
-	var suiteCount int
+	var suites []*cargoSuiteResult
 	var current *cargoSuiteResult
-
-	// Failure stdout is printed in a block after all tests run but before the
-	// summary line. We collect it per-test, then attach to the test results.
 	failureStdout := make(map[string]string)
 	var capturingFailure string
+
+	flush := func() {
+		if current == nil {
+			return
+		}
+		for _, tr := range current.tests {
+			if out, ok := failureStdout[tr.name]; ok {
+				tr.stdout = out
+			}
+		}
+		failureStdout = make(map[string]string)
+		suites = append(suites, current)
+		current = nil
+	}
 
 	for scanner.Scan() {
 		line := scanner.Text()
 
-		// Check for suite binary name lines first.
 		if name := parseCargoBinaryLine(line); name != "" {
-			// If we have a pending suite waiting for results, that shouldn't
-			// happen in well-formed output — but handle it gracefully.
-			if current != nil && current.testCount >= 0 {
-				// Suite from previous binary without a result line — emit what we have.
-			}
+			flush()
 			current = &cargoSuiteResult{name: name}
 			capturingFailure = ""
 			continue
 		}
 
-		// "running N tests"
 		if m := runningTestsRe.FindStringSubmatch(line); m != nil {
 			if current == nil {
 				current = &cargoSuiteResult{}
 			}
 			fmt.Sscanf(m[1], "%d", &current.testCount)
 			if current.name == "" {
-				current.name = fmt.Sprintf("suite-%d", suiteCount+1)
+				current.name = fmt.Sprintf("suite-%d", len(suites)+1)
 			}
 			capturingFailure = ""
 			continue
 		}
 
-		// "test <name> ... ok/FAILED/ignored"
 		if m := testResultRe.FindStringSubmatch(line); m != nil {
 			if current == nil {
 				continue
@@ -102,30 +97,23 @@ func ConvertCargoTest(r io.Reader, w io.Writer, verbose bool, skipEmpty bool, co
 			case "FAILED":
 				event = "failed"
 			case "ignored":
-				// already lowercase
 			default:
 				event = "ok"
 			}
-			current.tests = append(current.tests, &cargoTestResult{
-				name:  m[1],
-				event: event,
-			})
+			current.tests = append(current.tests, &cargoTestResult{name: m[1], event: event})
 			continue
 		}
 
-		// Failure stdout capture: "---- tests::test_fail stdout ----"
 		if m := failureStdoutHeaderRe.FindStringSubmatch(line); m != nil {
 			capturingFailure = m[1]
 			failureStdout[capturingFailure] = ""
 			continue
 		}
 
-		// If we're capturing failure stdout, accumulate lines until we hit
-		// another failure header, the "failures:" marker, or the summary.
 		if capturingFailure != "" {
 			if line == "failures:" || testSummaryRe.MatchString(line) {
 				capturingFailure = ""
-				// Fall through to handle these lines below.
+				// fall through
 			} else {
 				if failureStdout[capturingFailure] != "" {
 					failureStdout[capturingFailure] += "\n"
@@ -135,38 +123,45 @@ func ConvertCargoTest(r io.Reader, w io.Writer, verbose bool, skipEmpty bool, co
 			}
 		}
 
-		// "test result: ok/FAILED. N passed; N failed; ..."
 		if m := testSummaryRe.FindStringSubmatch(line); m != nil {
 			if current == nil {
 				continue
 			}
 			current.failed = m[1] == "FAILED"
-			suiteCount++
-
-			// Attach failure stdout to test results.
-			for _, tr := range current.tests {
-				if stdout, ok := failureStdout[tr.name]; ok {
-					tr.stdout = stdout
-				}
-			}
-			failureStdout = make(map[string]string)
-
-			emitCargoSuite(tw, current, verbose, skipEmpty)
-			if current.failed && exitCode < 1 {
-				exitCode = 1
-			}
-			if current.testCount == 0 && !skipEmpty && exitCode < 1 {
-				exitCode = 1
-			}
-			current = nil
+			flush()
 			continue
 		}
+	}
+	flush()
 
-		// "failures:" section listing test names — skip these lines.
-		// Other unrecognized lines (blank, compiler output, etc.) — skip.
+	exitCode := 0
+	var tops []ndjsoncrap.Test
+	for _, suite := range suites {
+		if len(suite.tests) == 0 {
+			tops = append(tops, ndjsoncrap.Test{
+				Description: suite.name,
+				OK:          true,
+				Directive:   skipDirective("no tests"),
+			})
+			continue
+		}
+		var subs []ndjsoncrap.Test
+		for _, tr := range suite.tests {
+			subs = append(subs, buildCargoTest(tr, len(subs)+1))
+		}
+		if suite.failed {
+			exitCode = 1
+		}
+		tops = append(tops, ndjsoncrap.Test{
+			Description: suite.name,
+			OK:          !suite.failed,
+			Subtest:     subs,
+		})
 	}
 
-	tw.Plan()
+	if err := writeResultStream(w, "cargo test", "cargo-test", tops); err != nil {
+		fmt.Fprintf(io.Discard, "%v", err)
+	}
 	return exitCode
 }
 
@@ -185,55 +180,21 @@ func parseCargoBinaryLine(line string) string {
 	return ""
 }
 
-func emitCargoSuite(tw *Writer, suite *cargoSuiteResult, verbose bool, skipEmpty bool) {
-	if len(suite.tests) == 0 {
-		if skipEmpty {
-			tw.Skip(suite.name, "no tests")
-		} else {
-			tw.NotOk(suite.name, nil)
-		}
-		return
-	}
-
-	sub := tw.Subtest(suite.name)
-	for _, tr := range suite.tests {
-		emitCargoTest(sub, tr, verbose)
-	}
-	sub.Plan()
-
-	if suite.failed {
-		tw.NotOk(suite.name, nil)
-	} else {
-		tw.Ok(suite.name)
-	}
-}
-
-func emitCargoTest(tw *Writer, tr *cargoTestResult, verbose bool) {
+func buildCargoTest(tr *cargoTestResult, n int) ndjsoncrap.Test {
+	t := ndjsoncrap.Test{N: n, Description: tr.name}
 	switch tr.event {
-	case "ok":
-		tw.Ok(tr.name)
 	case "failed":
+		t.OK = false
 		stdout := strings.TrimSpace(tr.stdout)
-		if stdout != "" {
-			ob := tw.StartOutputBlock(tr.name)
-			for _, line := range strings.Split(stdout, "\n") {
-				if line != "" {
-					ob.Line(line)
-				}
-			}
-			diag := map[string]string{}
-			file, line := parseRustFileLine(stdout)
-			if file != "" {
-				diag["file"] = file
-				diag["line"] = line
-			}
-			ob.NotOk(diag)
-		} else {
-			tw.NotOk(tr.name, nil)
+		t.Output = strPtr(stdout)
+		if file, line := parseRustFileLine(stdout); file != "" {
+			t.Diagnostic = map[string]any{"file": file, "line": line}
 		}
 	case "ignored":
-		tw.Skip(tr.name, "ignored")
+		t.OK = true
+		t.Directive = skipDirective("ignored")
 	default:
-		tw.Ok(tr.name)
+		t.OK = true
 	}
+	return t
 }

@@ -2,16 +2,12 @@ module github.com/amarbel-llc/crap/go-crap
 
 go 1.26
 
-require golang.org/x/text v0.34.0
-
-require github.com/benhoyt/goawk v1.31.0
+require golang.org/x/text v0.34.0 // indirect
 
 require (
 	github.com/charmbracelet/bubbles v1.0.0
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0
-	github.com/creack/pty/v2 v2.0.1
-	github.com/tonistiigi/vt100 v0.0.0-20240514184818-90bafcd6abab
 )
 
 require (

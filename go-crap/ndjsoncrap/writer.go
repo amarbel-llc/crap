@@ -48,13 +48,17 @@ func withType(rec Record) Record {
 		r.Type = "plan"
 		return r
 	case Test:
-		r.Type = "test"
-		return r
+		return stampTest(r)
 	case Bailout:
 		r.Type = "bailout"
 		return r
 	case Summary:
 		r.Type = "summary"
+		// The schema specifies an array; emit [] rather than null when empty
+		// so the wire shape matches tap-ndjson(7).
+		if r.Diagnostics == nil {
+			r.Diagnostics = []SummaryDiagnostic{}
+		}
 		return r
 	case NodeStart:
 		r.Type = "node_start"
@@ -74,4 +78,19 @@ func withType(rec Record) Record {
 	default:
 		return rec
 	}
+}
+
+// stampTest sets Type="test" on a test record and, recursively, on every
+// nested subtest, so subtest records carry the discriminator the schema
+// requires.
+func stampTest(t Test) Test {
+	t.Type = "test"
+	if t.Subtest != nil {
+		subs := make([]Test, len(t.Subtest))
+		for i, s := range t.Subtest {
+			subs[i] = stampTest(s)
+		}
+		t.Subtest = subs
+	}
+	return t
 }

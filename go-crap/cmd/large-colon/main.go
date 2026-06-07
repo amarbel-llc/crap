@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -38,6 +40,8 @@ func main() {
 		err = handleExec(ctx)
 	case "exec-parallel":
 		err = handleExecParallel(ctx)
+	case "present":
+		os.Exit(handlePresent(ctx, os.Args[2:]))
 	case "help", "-h", "--help":
 		printUsage()
 	default:
@@ -76,6 +80,49 @@ func printUsage() {
 	fmt.Fprintf(os.Stderr, "  :: cargo-test [args...]   Run cargo test and convert to CRAP-2\n")
 	fmt.Fprintf(os.Stderr, "  :: exec <cmd> [args...]   Run cmd sequentially and emit CRAP-2\n")
 	fmt.Fprintf(os.Stderr, "  :: exec-parallel          Run commands in parallel and emit CRAP-2\n")
+	fmt.Fprintf(os.Stderr, "  :: present [flags]        Render an ndjson-crap stream via the viewport\n")
+}
+
+// handlePresent delegates `:: present` to the standalone crap-present
+// binary. The presenter pulls in bubbletea, whose init() probes the
+// terminal (OSC 11 background-color query) for every process that imports
+// it; keeping that out of the general-purpose `::` binary means delegating
+// rather than importing. crap-present is resolved from PATH or alongside
+// this executable (they ship together).
+func handlePresent(ctx context.Context, args []string) int {
+	bin, err := resolvePresentBin()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "present: %v\n", err)
+		return 1
+	}
+	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		var ee *exec.ExitError
+		if errors.As(err, &ee) {
+			return ee.ExitCode()
+		}
+		fmt.Fprintf(os.Stderr, "present: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+// resolvePresentBin finds the crap-present binary on PATH, falling back to
+// the directory holding this executable.
+func resolvePresentBin() (string, error) {
+	if p, err := exec.LookPath("crap-present"); err == nil {
+		return p, nil
+	}
+	if exe, err := os.Executable(); err == nil {
+		cand := filepath.Join(filepath.Dir(exe), "crap-present")
+		if st, statErr := os.Stat(cand); statErr == nil && !st.IsDir() {
+			return cand, nil
+		}
+	}
+	return "", fmt.Errorf("crap-present not found on PATH or alongside %s", filepath.Base(os.Args[0]))
 }
 
 func stdoutIsTerminal() bool {

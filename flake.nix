@@ -52,6 +52,20 @@
           };
         };
 
+        crap-present = pkgs-master.buildGoModule.override { go = pkgs-master.go_1_26; } {
+          pname = "crap-present";
+          version = "0.1.0";
+          src = ./go-crap;
+          subPackages = [ "cmd/crap-present" ];
+          vendorHash = null;
+
+          meta = {
+            description = "ndjson-crap viewport presenter (standalone)";
+            homepage = "https://github.com/amarbel-llc/crap";
+            license = pkgs.lib.licenses.mit;
+          };
+        };
+
         crappy-git = pkgs-master.buildGoModule.override { go = pkgs-master.go_1_26; } {
           pname = "crappy-git";
           version = "0.1.0";
@@ -126,6 +140,7 @@
             name = "crap";
             paths = [
               large-colon
+              crap-present
               crappy-git
               crappy-brew
               crappy-direnv
@@ -133,6 +148,7 @@
           };
           inherit
             large-colon
+            crap-present
             crappy-git
             crappy-brew
             crappy-direnv

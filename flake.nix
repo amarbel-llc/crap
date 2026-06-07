@@ -32,6 +32,19 @@
         };
         pkgs-master = import nixpkgs-master { inherit system; };
 
+        # Producer side of the flake-input-go_mod protocol (RFC 0001):
+        # exposes the go-crap module's source tree as `go-pkgs` so sibling
+        # flakes (e.g. cutting-garden) can bridge it via goFlakeInputs
+        # instead of fetching a published version. crap is polyglot, so the
+        # module manifests are anchored under go-crap/.
+        goPkgs = pkgs.mkGoPkgs {
+          src = self;
+          extras = [
+            "^go-crap/go\\.mod$"
+            "^go-crap/go\\.sum$"
+          ];
+        };
+
         large-colon = pkgs-master.buildGoModule.override { go = pkgs-master.go_1_26; } {
           pname = "large-colon";
           version = "0.1.0";
@@ -94,6 +107,8 @@
             crap-present
             rust-crap
             ;
+          # go-crap module source for sibling-flake consumers (RFC 0001).
+          inherit (goPkgs) go-pkgs;
         };
 
         devShells.default = pkgs.mkShell {

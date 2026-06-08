@@ -101,6 +101,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		line := m.renderPhaseEnd(msg)
 		m.resetPhase()
 		return m, tea.Println(line)
+	case ItemFailed:
+		// Persist the failed-item verdict WITHOUT resetPhase(): the
+		// operation's bars and tail survive so it keeps advancing past the
+		// failure (crap RFC 0001 §7).
+		return m, tea.Println(m.renderItemFailed(msg))
 	case OperationDone:
 		if msg.Err != nil {
 			m.err = msg.Err
@@ -158,11 +163,28 @@ func (m Model) renderPhaseEnd(msg PhaseEnded) string {
 			b.WriteByte('\n')
 		}
 		b.WriteString(failStyle.Render("✗ " + desc))
-		for _, k := range sortedKeys(msg.Verdict.Diagnostic) {
-			b.WriteByte('\n')
-			b.WriteString(failStyle.Render(fmt.Sprintf("  %s: %v", k, msg.Verdict.Diagnostic[k])))
-		}
+		renderDiagnostic(&b, msg.Verdict.Diagnostic)
 		return b.String()
+	}
+}
+
+// renderItemFailed builds the persisted verdict line for a failed operation
+// item: the red ✗ label plus its diagnostic. Unlike renderPhaseEnd's failure
+// branch it does NOT hold the rolling tail above the line — a failed item
+// persists only itself, leaving the operation's live region intact.
+func (m Model) renderItemFailed(msg ItemFailed) string {
+	var b strings.Builder
+	b.WriteString(failStyle.Render("✗ " + msg.Label))
+	renderDiagnostic(&b, msg.Diagnostic)
+	return b.String()
+}
+
+// renderDiagnostic appends each diagnostic key/value as a styled, indented
+// line (each preceded by a newline) in deterministic sorted-key order.
+func renderDiagnostic(b *strings.Builder, diag map[string]any) {
+	for _, k := range sortedKeys(diag) {
+		b.WriteByte('\n')
+		b.WriteString(failStyle.Render(fmt.Sprintf("  %s: %v", k, diag[k])))
 	}
 }
 

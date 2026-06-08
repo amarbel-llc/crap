@@ -155,6 +155,75 @@ func TestDriverBase64Output(t *testing.T) {
 	t.Fatal("no LogLine emitted for base64 output")
 }
 
+// An operation-family stream (crap RFC 0001): operation_start arms the bars,
+// items feed the tail / persist failures and advance progress, operation_end
+// persists a tallied verdict. Asserts the §7 ordered mapping and that a failed
+// item does NOT reset the determinate bar.
+func TestDriverOperationFamily(t *testing.T) {
+	stream := strings.Join([]string{
+		`{"type":"operation_start","tp":3,"name":"sync","parent":null,"depth":0,"total":3,"bytes_total":1000}`,
+		`{"type":"item","op":3,"label":"blob-a","state":"done","bytes":100,"diagnostic":null}`,
+		`{"type":"item","op":3,"label":"blob-b","state":"skipped","bytes":0,"diagnostic":null,"directive":{"kind":"skip","reason":"exists"}}`,
+		`{"type":"item","op":3,"label":"blob-c","state":"failed","bytes":50,"diagnostic":{"error":"write failed"}}`,
+		`{"type":"operation_end","op":3,"done":1,"skipped":1,"failed":1,"total":3,"ok":false,"duration_ms":42}`,
+	}, "\n")
+	msgs := drive(t, stream)
+
+	// operation_start always arms the item bar via OperationStarted.
+	if os, ok := msgs[0].(OperationStarted); !ok || os.Name != "sync" || os.Total != 3 {
+		t.Fatalf("first msg should arm bar (name=sync total=3), got %#v", msgs[0])
+	}
+
+	var logs []LogLine
+	var failed []ItemFailed
+	var progresses []OperationProgress
+	var ended []PhaseEnded
+	sawDone := false
+	for _, m := range msgs {
+		switch v := m.(type) {
+		case LogLine:
+			logs = append(logs, v)
+		case ItemFailed:
+			failed = append(failed, v)
+		case OperationProgress:
+			progresses = append(progresses, v)
+		case PhaseEnded:
+			ended = append(ended, v)
+		case BatchDone:
+			sawDone = true
+		}
+	}
+
+	// The skipped item feeds the tail dimmed (↷); the done item plainly.
+	if len(logs) != 2 || logs[0].Text != "blob-a" || logs[1].Text != "↷ blob-b" {
+		t.Fatalf("item tail lines wrong: %#v", logs)
+	}
+	// The failed item persists via ItemFailed (not PhaseEnded).
+	if len(failed) != 1 || failed[0].Label != "blob-c" || failed[0].Diagnostic["error"] != "write failed" {
+		t.Fatalf("failed item should persist via ItemFailed: %#v", failed)
+	}
+	// Progress advanced 1->2->3 across the items (the byte-bar arm is a 4th).
+	var currents []int
+	for _, p := range progresses {
+		if p.Current > 0 {
+			currents = append(currents, p.Current)
+		}
+	}
+	if len(currents) != 3 || currents[0] != 1 || currents[1] != 2 || currents[2] != 3 {
+		t.Fatalf("progress should advance 1,2,3 (bar not reset by the failure): %v", currents)
+	}
+	// operation_end persists one tallied verdict.
+	if len(ended) != 1 || ended[0].Verdict.OK {
+		t.Fatalf("operation_end should persist a failing verdict: %#v", ended)
+	}
+	if !strings.Contains(ended[0].Description, "1 done, 1 skipped, 1 failed") || !strings.HasPrefix(ended[0].Description, "sync — ") {
+		t.Fatalf("operation_end tally description wrong: %q", ended[0].Description)
+	}
+	if !sawDone {
+		t.Fatal("driver must finalize a summary-less operation stream")
+	}
+}
+
 // presentPlain renders one verdict line per test on a non-TTY sink.
 func TestPresentPlain(t *testing.T) {
 	stream := strings.Join([]string{

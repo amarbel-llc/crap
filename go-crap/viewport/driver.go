@@ -38,11 +38,26 @@ type Driver struct {
 	testsSeen int
 	// sawSummary records whether a result-family summary ended the run.
 	sawSummary bool
+
+	// Operation family (crap RFC 0001), keyed by the operation's tp: opName
+	// names the operation_end verdict; opCurrent and opBytes track the running
+	// item/byte totals so each item can send the absolute OperationProgress
+	// the Model expects (its OperationProgress handler overwrites current/bytes
+	// rather than incrementing).
+	opName    map[int]string
+	opCurrent map[int]int
+	opBytes   map[int]int64
 }
 
 // NewDriver builds a Driver that sends messages to s.
 func NewDriver(s sender) *Driver {
-	return &Driver{s: s, nodeName: map[int]string{}}
+	return &Driver{
+		s:         s,
+		nodeName:  map[int]string{},
+		opName:    map[int]string{},
+		opCurrent: map[int]int{},
+		opBytes:   map[int]int64{},
+	}
 }
 
 // Run reads every record from r, driving the viewport, until io.EOF or a
@@ -127,9 +142,67 @@ func (d *Driver) feed(rec ndjsoncrap.Record) {
 		delete(d.nodeName, r.TP)
 		d.s.Send(PhaseEnded{Description: desc, Verdict: verdictFromNodeEnd(r)})
 
+	case ndjsoncrap.OperationStart:
+		d.opName[r.TP] = r.Name
+		d.opCurrent[r.TP] = 0
+		d.opBytes[r.TP] = 0
+		// Always arm the item bar via OperationStarted (never PhaseStarted).
+		d.s.Send(OperationStarted{Name: r.Name, Total: r.Total})
+		// OperationStarted carries no byte total, so arm the byte bar with a
+		// progress message when bytes_total is known.
+		if r.BytesTotal > 0 {
+			d.s.Send(OperationProgress{BytesTotal: r.BytesTotal})
+		}
+
+	case ndjsoncrap.Progress:
+		d.opCurrent[r.Op] = r.Current
+		d.opBytes[r.Op] = r.Bytes
+		d.s.Send(OperationProgress{
+			Current:    r.Current,
+			Total:      r.Total,
+			Bytes:      r.Bytes,
+			BytesTotal: r.BytesTotal,
+		})
+		if r.Label != "" {
+			d.s.Send(LogLine{Text: r.Label})
+		}
+
+	case ndjsoncrap.Item:
+		d.feedItem(r)
+
+	case ndjsoncrap.OperationEnd:
+		name := d.opName[r.Op]
+		delete(d.opName, r.Op)
+		delete(d.opCurrent, r.Op)
+		delete(d.opBytes, r.Op)
+		desc := fmt.Sprintf("%s — %d done, %d skipped, %d failed",
+			name, r.Done, r.Skipped, r.Failed)
+		d.s.Send(PhaseEnded{Description: desc, Verdict: VerdictView{OK: r.OK}})
+
 	case ndjsoncrap.Unknown:
 		// Forward compatibility: ignore record types we do not present.
 	}
+}
+
+// feedItem maps one operation item (crap RFC 0001 §4, §7). A done item feeds
+// the rolling tail transiently; a skipped item feeds it dimmed with a ↷
+// prefix; a failed item persists a verdict via ItemFailed (which does NOT
+// reset the operation's live region). All three then advance the operation's
+// progress — the OperationProgress is sent AFTER the item message, per §7's
+// left-to-right ordering. Bytes are accumulated so the absolute byte counter
+// the Model expects never regresses on a zero-byte item.
+func (d *Driver) feedItem(r ndjsoncrap.Item) {
+	switch r.State {
+	case ndjsoncrap.ItemFailed:
+		d.s.Send(ItemFailed{Label: r.Label, Diagnostic: r.Diagnostic})
+	case ndjsoncrap.ItemSkipped:
+		d.s.Send(LogLine{Text: "↷ " + r.Label})
+	default: // ItemDone
+		d.s.Send(LogLine{Text: r.Label})
+	}
+	d.opCurrent[r.Op]++
+	d.opBytes[r.Op] += r.Bytes
+	d.s.Send(OperationProgress{Current: d.opCurrent[r.Op], Bytes: d.opBytes[r.Op]})
 }
 
 // verdictFromTest resolves a result-family test record to a view verdict.

@@ -60,5 +60,16 @@ type PhaseEnded struct {
 	Verdict     VerdictView
 }
 
+// ItemFailed persists one failed operation item's verdict (✗ label +
+// diagnostic) via tea.Println WITHOUT resetting the operation's live region.
+// Unlike PhaseEnded (which resetPhase()s the bars+tail and holds the whole
+// tail above its verdict), ItemFailed leaves the progress bars and rolling
+// tail intact so the operation keeps advancing after a mid-run failure
+// (crap RFC 0001 §7).
+type ItemFailed struct {
+	Label      string
+	Diagnostic map[string]any
+}
+
 // BatchDone ends the whole run and quits the program.
 type BatchDone struct{ Err error }

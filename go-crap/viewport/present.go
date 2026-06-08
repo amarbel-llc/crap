@@ -94,6 +94,7 @@ func presentPlain(in io.Reader, opts Options) error {
 	out := opts.Out
 	r := ndjsoncrap.NewReader(in)
 	nodeName := map[int]string{}
+	opName := map[int]string{}
 	for {
 		rec, err := r.Next()
 		if err == io.EOF {
@@ -117,6 +118,21 @@ func presentPlain(in io.Reader, opts Options) error {
 			name := nodeName[v.TP]
 			delete(nodeName, v.TP)
 			plainVerdict(out, name, verdictFromNodeEnd(v), nil)
+		case ndjsoncrap.OperationStart:
+			opName[v.TP] = v.Name
+		case ndjsoncrap.Item:
+			// Off a TTY there is no rolling tail: done/skipped items are
+			// transient and persist nothing; only failures persist a verdict
+			// (crap RFC 0001 §4).
+			if v.State == ndjsoncrap.ItemFailed {
+				plainVerdict(out, v.Label, VerdictView{OK: false, Diagnostic: v.Diagnostic}, nil)
+			}
+		case ndjsoncrap.OperationEnd:
+			name := opName[v.Op]
+			delete(opName, v.Op)
+			desc := fmt.Sprintf("%s — %d done, %d skipped, %d failed",
+				name, v.Done, v.Skipped, v.Failed)
+			plainVerdict(out, desc, VerdictView{OK: v.OK}, nil)
 		}
 	}
 }

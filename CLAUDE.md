@@ -82,11 +82,16 @@ source for the `large-colon` (`::`) and `crap-present` CLIs. It is built
 around ndjson-crap + the viewport. Key packages/files:
 
 - `ndjsoncrap/` --- the canonical ndjson-crap wire format: tolerant
-  `Reader`/`Writer` and the record types (`Meta`, `Plan`, `Test`, `Bailout`,
-  `Summary`, `NodeStart`, `Command`, `Output`, `NodeEnd`, `Unknown`).
+  `Reader`/`Writer` and the record types. Result family (`Meta`, `Plan`,
+  `Test`, `Bailout`, `Summary`), execution family (`NodeStart`, `Command`,
+  `Output`, `NodeEnd`), operation family (`OperationStart`, `Progress`,
+  `Item`, `OperationEnd`; crap RFC 0001), and `Unknown`.
 - `viewport/` --- the bubbletea presenter: `Model` + messages + a `Driver`
   that turns ndjson-crap records into viewport messages, plus `Present()`
   with a plain non-TTY fallback.
+- `crap/` --- the producer Reporter API (crap RFC 0001 §10): `Reporter` with
+  `TestStream` (result), `Operation` (operation), and `Phase` (execution), so
+  tools emit conformant ndjson-crap without hand-writing records.
 - `presentcli/` --- shared CLI glue for the presenter.
 - `produce.go` --- the shared result-stream emitter (`writeResultStream` +
   summary tally) for the ndjson-crap producers.

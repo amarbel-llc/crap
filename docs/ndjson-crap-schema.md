@@ -21,8 +21,8 @@ any of them.
 
 ## Record families
 
-Every record carries a `type` discriminator. Records fall into two families;
-a single stream MAY mix them.
+Every record carries a `type` discriminator. Records fall into three
+families; a single stream MAY mix them.
 
 ### Result family (from `tap-ndjson(7)`)
 
@@ -49,6 +49,22 @@ below.
 | `command`        | `recipe_command`   | a command about to run under a node       |
 | `output`         | `output`           | a chunk of a node's child output          |
 | `node_end`       | `recipe_complete`  | a node finishes (exit code / signal)      |
+
+### Operation family (crap RFC 0001)
+
+A unit of work over many items that renders as a capped rolling tail + a
+progress bar collapsing to one verdict, rather than one persisted line per
+item. Routine items advance the bar transiently (no persist); only failures
+persist. Additive to ndjson-crap v1 — `ndjson` stays `1`. See
+[`docs/rfcs/0001-operation-family.md`](rfcs/0001-operation-family.md) for the
+normative spec (records, driver mapping, and the producer reporter API).
+
+| `type`            | purpose                                          |
+| ----------------- | ------------------------------------------------ |
+| `operation_start` | an operation begins (arms the bar)               |
+| `progress`        | advance the bars without naming an item (no persist) |
+| `item`            | one item's outcome (`done`/`skipped`/`failed`)   |
+| `operation_end`   | terminal tallied verdict (one per `operation_start`) |
 
 ### Header
 
@@ -156,7 +172,8 @@ All fields are always present; nullable fields use `null`.
 - `Reader` / `Writer` — tolerant decode (accepts just-us aliases, skips blank
   lines, unknown types → `Unknown`) and canonical encode.
 - record types: `Meta`, `Plan`, `Test`, `Directive`, `Bailout`, `Summary`,
-  `NodeStart`, `Command`, `Output`, `NodeEnd`, `Unknown`.
+  `NodeStart`, `Command`, `Output`, `NodeEnd`, `OperationStart`, `Progress`,
+  `Item`, `OperationEnd`, `Unknown`.
 
 `github.com/amarbel-llc/crap/go-crap/v2/viewport`:
 
@@ -165,6 +182,12 @@ All fields are always present; nullable fields use `null`.
 - `Model` / message types / `Driver` — the presenter internals (extracted from
   cutting-garden's `capture_viewport`, itself a WET copy of purse-first
   FDR 0010's operation_viewport).
+
+`github.com/amarbel-llc/crap/go-crap/v2/crap`:
+
+- `Reporter` — the producer-side API (crap RFC 0001 §10): `TestStream`
+  (result family), `Operation` (operation family), and `Phase` (execution
+  family), so tools emit conformant ndjson-crap without hand-writing records.
 
 ## CLI
 

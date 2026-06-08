@@ -222,7 +222,7 @@ left-to-right order**.
 
 | Record | Viewport message(s), in order | Persist? |
 | --- | --- | --- |
-| `operation_start` | `OperationStarted{Name, Total, BytesTotal}` — **always**, never `PhaseStarted` | no |
+| `operation_start` | `OperationStarted{Name, Total}` — **always**, never `PhaseStarted`; then `OperationProgress{BytesTotal}` when `bytes_total > 0` | no |
 | `progress` | `OperationProgress{Current, Total, Bytes, BytesTotal}`; then `LogLine{label}` when `label != ""` | no |
 | `item` done | `LogLine{label}`; then `OperationProgress{Current: ++}` | no |
 | `item` skipped | `LogLine{dimmed ↷ label}`; then `OperationProgress{Current: ++}` | no |
@@ -253,10 +253,12 @@ untouched and a following `OperationProgress` advances normally; the contrast
 `PhaseEnded` leg resets the bar to 0/0, confirming the defect above.)
 
 **`operation_start` always arms the bar.** It MUST map to `OperationStarted`
-(which sets `total`/`bytes_total` and arms the determinate bar), never to
-`PhaseStarted` (which resets the live region and does not arm a bar). A nested
-`operation_start` (`parent != null`) still maps to `OperationStarted` so child
-operations get a progress bar.
+(which sets the item `total` and arms the determinate bar), never to
+`PhaseStarted` (which resets the live region and does not arm a bar).
+`OperationStarted` carries no byte total, so a non-zero `bytes_total` is armed
+via a follow-on `OperationProgress{BytesTotal}` — keeping `ItemFailed` the only
+new `Model` message. A nested `operation_start` (`parent != null`) still maps
+to `OperationStarted` so child operations get a progress bar.
 
 **`operation_end` tallies ride in `Description`.** The verdict's success
 render path reads only `PhaseEnded.Description`, not its `Verdict.Diagnostic`;

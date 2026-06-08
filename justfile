@@ -122,9 +122,20 @@ release new_version:
         msg="$header"
     fi
 
-    just bump-version "{{new_version}}"
-    git add version.env rust-crap/Cargo.toml rust-crap/Cargo.lock
-    git commit -m "$header"
+    # Bump + commit only when version.env isn't already at the target.
+    # Sourcing version.env (the single source of truth, as the `tag` recipe
+    # does) makes release idempotent: if the version was already bumped and
+    # committed in an earlier commit (e.g. to satisfy rust-crap/build.rs's
+    # Cargo.toml == version.env check), re-running release skips the empty
+    # commit instead of aborting on `git commit`.
+    . ./version.env
+    if [[ "${CRAP_VERSION:-}" != "{{new_version}}" ]]; then
+        just bump-version "{{new_version}}"
+        git add version.env rust-crap/Cargo.toml rust-crap/Cargo.lock
+        git commit -m "$header"
+    else
+        gum log --level info "version.env already at {{new_version}} --- skipping bump/commit"
+    fi
     git push origin master
 
     just tag "$msg"

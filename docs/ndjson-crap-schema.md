@@ -151,14 +151,14 @@ All fields are always present; nullable fields use `null`.
 
 ## Go API
 
-`github.com/amarbel-llc/crap/go-crap/ndjsoncrap`:
+`github.com/amarbel-llc/crap/go-crap/v2/ndjsoncrap`:
 
 - `Reader` / `Writer` — tolerant decode (accepts just-us aliases, skips blank
   lines, unknown types → `Unknown`) and canonical encode.
 - record types: `Meta`, `Plan`, `Test`, `Directive`, `Bailout`, `Summary`,
   `NodeStart`, `Command`, `Output`, `NodeEnd`, `Unknown`.
 
-`github.com/amarbel-llc/crap/go-crap/viewport`:
+`github.com/amarbel-llc/crap/go-crap/v2/viewport`:
 
 - `Present(in, Options)` — render an ndjson-crap stream via the bubbletea
   viewport on a TTY, or a plain verdict-per-line fallback off a TTY.

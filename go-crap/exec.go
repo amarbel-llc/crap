@@ -6,7 +6,7 @@ import (
 	"io"
 	"os/exec"
 
-	"github.com/amarbel-llc/crap/go-crap/ndjsoncrap"
+	"github.com/amarbel-llc/crap/go-crap/v2/ndjsoncrap"
 )
 
 // ConvertExec runs a single command and writes an execution-family

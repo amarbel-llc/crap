@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/amarbel-llc/crap/go-crap/ndjsoncrap"
+	"github.com/amarbel-llc/crap/go-crap/v2/ndjsoncrap"
 )
 
 type testEvent struct {

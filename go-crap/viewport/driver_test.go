@@ -6,7 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/amarbel-llc/crap/go-crap/ndjsoncrap"
+	"github.com/amarbel-llc/crap/go-crap/v2/ndjsoncrap"
 )
 
 // fakeSender records the messages a Driver emits.

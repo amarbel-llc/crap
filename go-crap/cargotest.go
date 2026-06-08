@@ -7,7 +7,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/amarbel-llc/crap/go-crap/ndjsoncrap"
+	"github.com/amarbel-llc/crap/go-crap/v2/ndjsoncrap"
 )
 
 type cargoTestResult struct {

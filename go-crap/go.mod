@@ -1,4 +1,4 @@
-module github.com/amarbel-llc/crap/go-crap
+module github.com/amarbel-llc/crap/go-crap/v2
 
 go 1.26
 

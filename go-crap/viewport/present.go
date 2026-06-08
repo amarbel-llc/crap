@@ -52,12 +52,36 @@ func Present(in io.Reader, opts Options) error {
 		tea.WithInput(strings.NewReader("")),
 	)
 
+	return runProgram(p, in)
+}
+
+// runProgram runs the bubbletea program p while a driver goroutine feeds it
+// ndjson-crap records read from in. The happy path: the driver reaches EOF,
+// the program quits, and p.Run returns nil, so the driver's error is the
+// result.
+//
+// If p.Run returns an error first (e.g. terminal setup failure), the driver
+// goroutine would otherwise stay blocked forever on in.Read because nothing
+// closes the read end. To avoid that goroutine leak (and the caller-side
+// hang it causes when in is a pipe whose writer waits on a full buffer), the
+// error path closes in to unblock the pending Read, then reaps the goroutine
+// before returning.
+func runProgram(p *tea.Program, in io.Reader) error {
 	driveErr := make(chan error, 1)
 	go func() {
 		driveErr <- NewDriver(p).Run(ndjsoncrap.NewReader(in))
 	}()
 
 	if _, err := p.Run(); err != nil {
+		if c, ok := in.(io.Closer); ok {
+			// Closing unblocks the driver's pending Read (io.PipeReader
+			// makes it return ErrClosedPipe), so reaping the goroutine
+			// can't hang. A non-Closer reader can't be unblocked, so
+			// returning immediately (leaking at worst) beats blocking
+			// the caller forever on <-driveErr.
+			_ = c.Close()
+			<-driveErr
+		}
 		return err
 	}
 	return <-driveErr

@@ -137,6 +137,34 @@ func Decode(data []byte) (Record, error) {
 		n.Type = "node_end"
 		return n, nil
 
+	case "operation_start":
+		var os OperationStart
+		if err := json.Unmarshal(data, &os); err != nil {
+			return nil, decodeErr("operation_start", err)
+		}
+		return os, nil
+
+	case "progress":
+		var p Progress
+		if err := json.Unmarshal(data, &p); err != nil {
+			return nil, decodeErr("progress", err)
+		}
+		return p, nil
+
+	case "item":
+		var it Item
+		if err := json.Unmarshal(data, &it); err != nil {
+			return nil, decodeErr("item", err)
+		}
+		return it, nil
+
+	case "operation_end":
+		var oe OperationEnd
+		if err := json.Unmarshal(data, &oe); err != nil {
+			return nil, decodeErr("operation_end", err)
+		}
+		return oe, nil
+
 	default:
 		// Forward compatibility: retain the record verbatim, do not error.
 		return Unknown{Type: env.Type, Raw: append(json.RawMessage(nil), data...)}, nil

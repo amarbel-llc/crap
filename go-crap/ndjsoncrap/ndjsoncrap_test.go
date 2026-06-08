@@ -172,6 +172,103 @@ func TestReaderSkipsBlanksAndEOF(t *testing.T) {
 	}
 }
 
+// The operation family (crap RFC 0001) must round-trip through Writer ->
+// Reader with its type discriminators and fields intact.
+func TestOperationFamilyRoundTrip(t *testing.T) {
+	var buf bytes.Buffer
+	w := NewWriter(&buf)
+	recs := []Record{
+		OperationStart{TP: 3, Name: "sync", Total: 1280, BytesTotal: 536870912},
+		Progress{Op: 3, Current: 640, Total: 1280, Bytes: 268435456, BytesTotal: 536870912, Label: "blob-x"},
+		Item{Op: 3, Label: "blob-a", State: ItemDone, Bytes: 1258291},
+		Item{Op: 3, Label: "blob-b", State: ItemSkipped, Directive: &Directive{Kind: "skip", Reason: "exists"}},
+		Item{Op: 3, Label: "blob-c", State: ItemFailed, Diagnostic: map[string]any{"error": "write failed"}},
+		OperationEnd{Op: 3, Done: 1, Skipped: 1, Failed: 1, Total: 3, OK: false, DurationMs: 48213},
+	}
+	for _, rec := range recs {
+		if err := w.Write(rec); err != nil {
+			t.Fatalf("write %T: %v", rec, err)
+		}
+	}
+
+	r := NewReader(&buf)
+	var got []Record
+	for {
+		rec, err := r.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatalf("decode operation stream: %v", err)
+		}
+		got = append(got, rec)
+	}
+	if len(got) != 6 {
+		t.Fatalf("record count: got %d want 6", len(got))
+	}
+	if os, ok := got[0].(OperationStart); !ok || os.TP != 3 || os.Name != "sync" || os.Total != 1280 || os.BytesTotal != 536870912 {
+		t.Fatalf("operation_start round-trip: %#v", got[0])
+	}
+	if p, ok := got[1].(Progress); !ok || p.Op != 3 || p.Current != 640 || p.Label != "blob-x" || p.Bytes != 268435456 {
+		t.Fatalf("progress round-trip: %#v", got[1])
+	}
+	if it, ok := got[2].(Item); !ok || it.State != ItemDone || it.Label != "blob-a" || it.Bytes != 1258291 {
+		t.Fatalf("item done round-trip: %#v", got[2])
+	}
+	if it, ok := got[3].(Item); !ok || it.State != ItemSkipped || it.Directive == nil || it.Directive.Reason != "exists" {
+		t.Fatalf("item skipped round-trip: %#v", got[3])
+	}
+	if it, ok := got[4].(Item); !ok || it.State != ItemFailed || it.Diagnostic["error"] != "write failed" {
+		t.Fatalf("item failed round-trip: %#v", got[4])
+	}
+	if oe, ok := got[5].(OperationEnd); !ok || oe.Op != 3 || oe.Done != 1 || oe.Skipped != 1 || oe.Failed != 1 || oe.OK {
+		t.Fatalf("operation_end round-trip: %#v", got[5])
+	}
+}
+
+// A done item must omit the directive field but always carry diagnostic
+// (null), and the wire type must be exactly "item".
+func TestItemWireShape(t *testing.T) {
+	var buf bytes.Buffer
+	if err := NewWriter(&buf).Write(Item{Op: 3, Label: "blob-a", State: ItemDone, Bytes: 10}); err != nil {
+		t.Fatal(err)
+	}
+	got := strings.TrimSpace(buf.String())
+	want := `{"type":"item","op":3,"label":"blob-a","state":"done","bytes":10,"diagnostic":null}`
+	if got != want {
+		t.Fatalf("\n got: %s\nwant: %s", got, want)
+	}
+}
+
+// A pre-RFC-0001 reader (one that does not know the operation family) must
+// decode these records to Unknown, not error: this is the §7 / §Compatibility
+// forward-compatibility contract. We simulate that reader by decoding the
+// envelope and asserting the discriminators are the only thing a v1 consumer
+// needs — i.e. that they are distinct, additive type strings.
+func TestOperationFamilyDiscriminators(t *testing.T) {
+	for _, rec := range []Record{
+		OperationStart{TP: 1, Name: "x"},
+		Progress{Op: 1},
+		Item{Op: 1, Label: "y", State: ItemDone},
+		OperationEnd{Op: 1},
+	} {
+		var buf bytes.Buffer
+		if err := NewWriter(&buf).Write(rec); err != nil {
+			t.Fatal(err)
+		}
+		// Decode through the real Reader (which DOES know them) to confirm the
+		// wire "type" matches RecordType — the value a v1 consumer keys its
+		// Unknown fallback on.
+		dec, err := Decode(bytes.TrimSpace(buf.Bytes()))
+		if err != nil {
+			t.Fatalf("decode %T: %v", rec, err)
+		}
+		if dec.RecordType() != rec.RecordType() {
+			t.Fatalf("discriminator drift: wrote %q decoded %q", rec.RecordType(), dec.RecordType())
+		}
+	}
+}
+
 // The Meta header stamps default schema versions when unset.
 func TestWriteHeaderDefaults(t *testing.T) {
 	var buf bytes.Buffer

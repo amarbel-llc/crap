@@ -75,6 +75,18 @@ func withType(rec Record) Record {
 	case NodeEnd:
 		r.Type = "node_end"
 		return r
+	case OperationStart:
+		r.Type = "operation_start"
+		return r
+	case Progress:
+		r.Type = "progress"
+		return r
+	case Item:
+		r.Type = "item"
+		return r
+	case OperationEnd:
+		r.Type = "operation_end"
+		return r
 	default:
 		return rec
 	}

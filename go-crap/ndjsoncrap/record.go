@@ -181,6 +181,76 @@ type NodeEnd struct {
 
 func (NodeEnd) RecordType() string { return "node_end" }
 
+// OperationStart begins an operation-family operation: a unit of work over
+// many items that renders as a capped rolling tail + progress bar collapsing
+// to one verdict (crap RFC 0001). tp is a stream-unique operation id; parent
+// links it into the shared tp tree. total/bytes_total of 0 mean unknown
+// (indeterminate bar).
+type OperationStart struct {
+	Type       string `json:"type"` // "operation_start"
+	TP         int    `json:"tp"`
+	Name       string `json:"name"`
+	Parent     *int   `json:"parent"`
+	Depth      int    `json:"depth"`
+	Total      int    `json:"total"`
+	BytesTotal int64  `json:"bytes_total"`
+}
+
+func (OperationStart) RecordType() string { return "operation_start" }
+
+// Progress advances an operation's bars without naming an item and without
+// persisting a line (crap RFC 0001). op references the OperationStart tp. A
+// total/bytes_total of 0 leaves the prior denominator unchanged.
+type Progress struct {
+	Type       string `json:"type"` // "progress"
+	Op         int    `json:"op"`
+	Current    int    `json:"current"`
+	Total      int    `json:"total"`
+	Bytes      int64  `json:"bytes"`
+	BytesTotal int64  `json:"bytes_total"`
+	Label      string `json:"label,omitempty"`
+}
+
+func (Progress) RecordType() string { return "progress" }
+
+// Item reports the outcome of one work item within an operation (crap RFC
+// 0001). state is "done", "skipped", or "failed". diagnostic is null except
+// for failures; directive may carry a skip reason for "skipped".
+type Item struct {
+	Type       string         `json:"type"` // "item"
+	Op         int            `json:"op"`
+	Label      string         `json:"label"`
+	State      string         `json:"state"`
+	Bytes      int64          `json:"bytes"`
+	Diagnostic map[string]any `json:"diagnostic"`
+	Directive  *Directive     `json:"directive,omitempty"`
+}
+
+func (Item) RecordType() string { return "item" }
+
+// Item state values.
+const (
+	ItemDone    = "done"
+	ItemSkipped = "skipped"
+	ItemFailed  = "failed"
+)
+
+// OperationEnd terminates an operation with a tallied verdict (crap RFC
+// 0001). Exactly one per OperationStart. ok is failed==0 and the operation
+// did not abort.
+type OperationEnd struct {
+	Type       string `json:"type"` // "operation_end"
+	Op         int    `json:"op"`
+	Done       int    `json:"done"`
+	Skipped    int    `json:"skipped"`
+	Failed     int    `json:"failed"`
+	Total      int    `json:"total"`
+	OK         bool   `json:"ok"`
+	DurationMs uint64 `json:"duration_ms"`
+}
+
+func (OperationEnd) RecordType() string { return "operation_end" }
+
 // Unknown holds a record whose "type" this build does not recognize. It is
 // retained verbatim so a consumer can round-trip or skip it. Producers MUST
 // NOT emit Unknown; it exists only for forward-compatible decoding.

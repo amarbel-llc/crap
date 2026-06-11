@@ -133,8 +133,15 @@ func TestConvertExecEmitsExecutionFamily(t *testing.T) {
 		t.Fatalf("exec should surface exit code 3, got %d", code)
 	}
 	recs := collect(t, buf.String())
-	if _, ok := recs[0].(ndjsoncrap.NodeStart); !ok {
+	start, ok := recs[0].(ndjsoncrap.NodeStart)
+	if !ok {
 		t.Fatalf("first record should be node_start, got %T", recs[0])
+	}
+	if start.TP != 1 {
+		t.Fatalf("default node id should be 1, got %d", start.TP)
+	}
+	if start.Name != "sh -c echo hello; echo oops 1>&2; exit 3" {
+		t.Fatalf("default label should be the joined command line, got %q", start.Name)
 	}
 	var sawHello, sawOops bool
 	var end *ndjsoncrap.NodeEnd
@@ -156,5 +163,47 @@ func TestConvertExecEmitsExecutionFamily(t *testing.T) {
 	}
 	if end == nil || end.ExitCode == nil || *end.ExitCode != 3 {
 		t.Fatalf("node_end exit code wrong: %#v", end)
+	}
+	if end.Diagnostic == nil || end.Diagnostic["error"] == nil || end.Diagnostic["command"] == nil {
+		t.Fatalf("failing node_end should carry an error/command diagnostic: %#v", end.Diagnostic)
+	}
+}
+
+// ConvertExecOpts stamps the caller's node id and label on every record so
+// concatenated invocations compose into one multi-node stream; a successful
+// node_end carries no diagnostic.
+func TestConvertExecOptsStampsNodeIDAndLabel(t *testing.T) {
+	var buf bytes.Buffer
+	code := ConvertExecOpts(context.Background(), "sh", []string{"-c", "echo hi"}, &buf,
+		ExecOptions{TP: 7, Name: "dodder"})
+	if code != 0 {
+		t.Fatalf("exit code: got %d want 0", code)
+	}
+	recs := collect(t, buf.String())
+	start, ok := recs[0].(ndjsoncrap.NodeStart)
+	if !ok || start.TP != 7 || start.Name != "dodder" {
+		t.Fatalf("node_start should carry tp=7 name=dodder: %#v", recs[0])
+	}
+	var sawOutput bool
+	var end *ndjsoncrap.NodeEnd
+	for _, r := range recs {
+		switch v := r.(type) {
+		case ndjsoncrap.Output:
+			sawOutput = true
+			if v.TP != 7 {
+				t.Fatalf("output should carry tp=7: %#v", v)
+			}
+		case ndjsoncrap.NodeEnd:
+			end = &v
+		}
+	}
+	if !sawOutput {
+		t.Fatal("missing output record")
+	}
+	if end == nil || end.TP != 7 || end.ExitCode == nil || *end.ExitCode != 0 {
+		t.Fatalf("node_end should carry tp=7 exit_code=0: %#v", end)
+	}
+	if end.Diagnostic != nil {
+		t.Fatalf("successful node_end must not carry a diagnostic: %#v", end.Diagnostic)
 	}
 }

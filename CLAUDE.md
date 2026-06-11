@@ -98,8 +98,11 @@ around ndjson-crap + the viewport. Key packages/files:
 - `gotest.go` / `cargotest.go` --- `ConvertGoTest` / `ConvertCargoTest`: turn
   `go test -json` / `cargo test` output into ndjson-crap (packages/suites are
   top-level test records; tests nest as subtests).
-- `exec.go` --- `ConvertExec`: run a command, emit execution-family records
-  (`node_start`/`output`/`node_end`).
+- `exec.go` --- `ConvertExec` / `ConvertExecOpts`: run a command, emit
+  execution-family records (`node_start`/`output`/`node_end`); options set
+  the node id (`tp`) and label so concatenated invocations compose into one
+  multi-node stream (`:: exec --tp N --name LABEL -- <cmd>`), and a failing
+  `node_end` carries an `{"error", "command"}` diagnostic.
 - `cmd/large-colon/main.go` --- the `::` CLI: producer subcommands (`go-test`,
   `cargo-test`, `exec`, `validate`) plus `present`/`reformat`/no-args, which
   delegate to `crap-present`.

@@ -11,6 +11,7 @@ import (
 	"bufio"
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -68,7 +69,8 @@ func printUsage() {
 	fmt.Fprintf(os.Stderr, "  :: present [flags]        Same as above (also: reformat)\n")
 	fmt.Fprintf(os.Stderr, "  :: go-test [args...]      Run `go test -json` and emit ndjson-crap\n")
 	fmt.Fprintf(os.Stderr, "  :: cargo-test [args...]   Run `cargo test` and emit ndjson-crap\n")
-	fmt.Fprintf(os.Stderr, "  :: exec <cmd> [args...]   Run a command and emit ndjson-crap (execution records)\n")
+	fmt.Fprintf(os.Stderr, "  :: exec [--tp N] [--name LABEL] [--] <cmd> [args...]\n")
+	fmt.Fprintf(os.Stderr, "                            Run a command and emit ndjson-crap (execution records)\n")
 	fmt.Fprintf(os.Stderr, "  :: validate               Validate an ndjson-crap stream on stdin\n")
 	fmt.Fprintf(os.Stderr, "  :: version                Print version and commit\n")
 }
@@ -145,11 +147,35 @@ func handleCargoTest(ctx context.Context, args []string) int {
 }
 
 func handleExec(ctx context.Context, args []string) int {
-	if len(args) == 0 {
-		fmt.Fprintf(os.Stderr, "exec: missing command\n")
+	opts, cmdArgs, err := parseExecArgs(args)
+	if err != nil {
+		// FlagSet errors are already reported to stderr by Parse itself.
+		if errors.Is(err, errMissingCommand) {
+			fmt.Fprintf(os.Stderr, "exec: %v\n", err)
+		}
 		return 64
 	}
-	return crap.ConvertExec(ctx, args[0], args[1:], os.Stdout)
+	return crap.ConvertExecOpts(ctx, cmdArgs[0], cmdArgs[1:], os.Stdout, opts)
+}
+
+var errMissingCommand = errors.New("missing command")
+
+// parseExecArgs splits `:: exec` arguments into the producer options and the
+// wrapped command. Flag parsing stops at the first non-flag argument or at
+// `--`, so the wrapped command's own flags pass through untouched.
+func parseExecArgs(args []string) (crap.ExecOptions, []string, error) {
+	fs := flag.NewFlagSet("exec", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	tp := fs.Int("tp", 1, "stream-unique node id for the emitted records")
+	name := fs.String("name", "", "node label (default: the joined command line)")
+	if err := fs.Parse(args); err != nil {
+		return crap.ExecOptions{}, nil, err
+	}
+	cmdArgs := fs.Args()
+	if len(cmdArgs) == 0 {
+		return crap.ExecOptions{}, nil, errMissingCommand
+	}
+	return crap.ExecOptions{TP: *tp, Name: *name}, cmdArgs, nil
 }
 
 // handleValidate reads an ndjson-crap stream on stdin and reports any

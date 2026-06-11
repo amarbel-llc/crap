@@ -104,6 +104,22 @@ document are to be interpreted as described in RFC 2119.
 
 One process may hold all three roles at once.
 
+A child's output is exhaustively one of two things:
+
+- **Crap** — records in a negotiated format, on the channel, from a child
+  that attached.
+- **Garbage** — everything else: the plain stdout/stderr of a child that
+  never attached (canonically, *garbage*), plus whatever an attached child
+  still writes to its captured stdio.
+
+Every node that executes subprocesses MUST handle both: crap by
+re-offering (Section 6) so it lands on the channel already structured, and
+garbage by capturing it and wrapping it as `output` records under the
+child's execution node. The tree is therefore complete either way — an
+attached child appears as nested nodes, an unattached child as a node with
+captured garbage — and a presenter never has to care which kind of child
+produced what it renders.
+
 ### 2. The offer
 
 A harness offers by exporting **one REQUIRED variable**:
@@ -276,6 +292,18 @@ stdout has repointed the child's fd 1 away from the channel). So:
 know the variables exist. That asymmetry is load-bearing: it is what lets
 an offer tunnel through `sh -c`, login shells, and pipelines to reach a
 producer several layers down.)
+
+One withdraw is REQUIRED rather than optional: a child whose stdout the
+parent consumes **as data** — command substitution, backtick evaluation,
+`shell()`-style functions — MUST have the offer withdrawn by any aware
+parent (attached or not). Stdout is the default channel, so a producer
+attaching there would leak records into the computed value. (The same
+hazard exists under *unaware* intermediaries — `x=$(just build)` in a
+plain shell under an exported `CRAP=2` captures records, exactly as
+`x=$(ls --color=always)` captures escape codes under a forced-color
+environment. Harnesses that export the offer broadly — e.g. session-wide
+rather than around one pipeline — SHOULD set an explicit non-stdout
+`CRAP_FD` to remove the hazard at the source.)
 
 Two re-offer topologies:
 
@@ -459,7 +487,10 @@ passthrough re-offer; see just-us `docs/features/0002-crap-attach.md`).
 Conformance lives there as unit tests plus bats once the suite grows
 attach coverage (`zz-tests_bats/`, tag `crap_attach`); the table below is
 the requirement map. bats/nix were unavailable in the authoring container,
-so the bats lane is specified but not yet written.
+so the bats lane is specified but not yet written. The prototype was
+verified end to end against the canonical consumers: a nested
+two-justfile run under `CRAP=2` piped into `crap-present` renders one
+verdict per node, and the stream passes `:: validate`.
 
 | Requirement | Test | Description |
 | --- | --- | --- |

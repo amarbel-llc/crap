@@ -37,6 +37,10 @@ test: test-go test-cargo
 test-go:
     cd go-crap && nix develop ../ --command go test ./...
 
+# Go tests under the race detector; catches concurrent-writer bugs like #23.
+test-go-race:
+    cd go-crap && nix develop ../ --command go test -race ./...
+
 test-cargo:
     nix develop --command cargo test --manifest-path rust-crap/Cargo.toml
 

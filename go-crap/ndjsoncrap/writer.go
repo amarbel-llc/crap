@@ -3,11 +3,17 @@ package ndjsoncrap
 import (
 	"encoding/json"
 	"io"
+	"sync"
 )
 
 // Writer emits ndjson-crap, one JSON record per line. HTML escaping is
 // disabled so diagnostic text and command strings round-trip unmangled.
+// Write is safe for concurrent use: producers routinely emit from several
+// goroutines (ConvertExec's stdout/stderr pumps, reporter callers writing
+// items from workers), and an unsynchronized json.Encoder interleaves
+// records into invalid JSON (#23).
 type Writer struct {
+	mu  sync.Mutex
 	enc *json.Encoder
 }
 
@@ -22,6 +28,8 @@ func NewWriter(w io.Writer) *Writer {
 // schema versions) on rec and encodes it as one line. Callers may pass a
 // record with Type unset; Write fills it in.
 func (w *Writer) Write(rec Record) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	return w.enc.Encode(withType(rec))
 }
 

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"io"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -150,6 +151,48 @@ func TestNodeEndDiagnosticRoundTrip(t *testing.T) {
 	}
 	if n := rec.(NodeEnd); n.Diagnostic != nil {
 		t.Fatalf("absent diagnostic must decode to nil: %#v", n.Diagnostic)
+	}
+}
+
+// Writer must be safe for concurrent producers (#23): records written from
+// multiple goroutines (ConvertExec's stdout/stderr pumps, reporter callers
+// emitting items from workers) must each land as one intact line. Run under
+// `just test-go-race` to catch the unsynchronized-encoder regression.
+func TestWriterConcurrentWrites(t *testing.T) {
+	var buf bytes.Buffer
+	w := NewWriter(&buf)
+	const writers, perWriter = 8, 200
+	var wg sync.WaitGroup
+	for g := range writers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range perWriter {
+				if err := w.Write(Output{TP: g, Stream: StreamStdout, Data: strings.Repeat("x", i) + "\n"}); err != nil {
+					t.Errorf("write: %v", err)
+				}
+			}
+		}()
+	}
+	wg.Wait()
+
+	r := NewReader(&buf)
+	var n int
+	for {
+		rec, err := r.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatalf("record %d corrupted by interleaved writes: %v", n, err)
+		}
+		if _, ok := rec.(Output); !ok {
+			t.Fatalf("record %d mangled: %#v", n, rec)
+		}
+		n++
+	}
+	if n != writers*perWriter {
+		t.Fatalf("record count: got %d want %d", n, writers*perWriter)
 	}
 }
 

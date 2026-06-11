@@ -98,7 +98,7 @@ func TestDriverExecutionFamily(t *testing.T) {
 	var started []PhaseStarted
 	var ended []PhaseEnded
 	var logs []LogLine
-	sawDone := false
+	var done *BatchDone
 	for _, m := range msgs {
 		switch v := m.(type) {
 		case PhaseStarted:
@@ -108,7 +108,7 @@ func TestDriverExecutionFamily(t *testing.T) {
 		case LogLine:
 			logs = append(logs, v)
 		case BatchDone:
-			sawDone = true
+			done = &v
 		}
 	}
 	if len(started) != 2 || started[0].Description != "build" || started[1].Description != "test" {
@@ -129,9 +129,13 @@ func TestDriverExecutionFamily(t *testing.T) {
 	if len(logs) != 2 || logs[0].Text != "$ go build ./..." || logs[1].Text != "compiling" {
 		t.Fatalf("command/output not fed to tail: %#v", logs)
 	}
-	// No summary record, so the driver must synthesize a finalization.
-	if !sawDone {
+	// No summary record, so the driver must synthesize a finalization — and
+	// the SIGINT node failure must fail the run verdict (#24).
+	if done == nil {
 		t.Fatal("driver must finalize a summary-less stream")
+	}
+	if done.Err == nil {
+		t.Fatal("signal-failed node must fail the run verdict")
 	}
 }
 
@@ -296,6 +300,11 @@ func TestDriverOperationFamily(t *testing.T) {
 	}
 	if !sawDone {
 		t.Fatal("driver must finalize a summary-less operation stream")
+	}
+	// The failed item is counted once: its failing operation_end must not
+	// re-count it (#24 review followup).
+	if err := batchErr(t, msgs); err == nil || err.Error() != "1 failed" {
+		t.Fatalf("run verdict should count the failed item exactly once: %v", err)
 	}
 }
 

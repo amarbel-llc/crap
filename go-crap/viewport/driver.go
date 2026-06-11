@@ -52,6 +52,9 @@ type Driver struct {
 	opName    map[int]string
 	opCurrent map[int]int
 	opBytes   map[int]int64
+	// opFailed counts an operation's failed items so its operation_end does
+	// not re-count failures already tallied item-by-item.
+	opFailed map[int]int
 }
 
 // NewDriver builds a Driver that sends messages to s.
@@ -62,6 +65,7 @@ func NewDriver(s sender) *Driver {
 		opName:    map[int]string{},
 		opCurrent: map[int]int{},
 		opBytes:   map[int]int64{},
+		opFailed:  map[int]int{},
 	}
 }
 
@@ -193,12 +197,19 @@ func (d *Driver) feed(rec ndjsoncrap.Record) {
 
 	case ndjsoncrap.OperationEnd:
 		name := d.opName[r.Op]
+		// A failing operation whose item failures were already counted must
+		// not count again; one that failed without failed items (an abort)
+		// counts once.
+		if !r.OK && d.opFailed[r.Op] == 0 {
+			d.failures++
+		}
 		delete(d.opName, r.Op)
 		delete(d.opCurrent, r.Op)
 		delete(d.opBytes, r.Op)
+		delete(d.opFailed, r.Op)
 		desc := fmt.Sprintf("%s — %d done, %d skipped, %d failed",
 			name, r.Done, r.Skipped, r.Failed)
-		d.endPhase(desc, VerdictView{OK: r.OK})
+		d.s.Send(PhaseEnded{Description: desc, Verdict: VerdictView{OK: r.OK}})
 
 	case ndjsoncrap.Unknown:
 		// Forward compatibility: ignore record types we do not present.
@@ -216,6 +227,7 @@ func (d *Driver) feedItem(r ndjsoncrap.Item) {
 	switch r.State {
 	case ndjsoncrap.ItemFailed:
 		d.failures++
+		d.opFailed[r.Op]++
 		d.s.Send(ItemFailed{Label: r.Label, Diagnostic: r.Diagnostic})
 	case ndjsoncrap.ItemSkipped:
 		d.s.Send(LogLine{Text: "↷ " + r.Label})

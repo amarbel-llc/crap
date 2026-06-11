@@ -38,6 +38,11 @@ type Driver struct {
 	testsSeen int
 	// sawSummary records whether a result-family summary ended the run.
 	sawSummary bool
+	// failures counts failing verdicts from every family (failed nodes,
+	// bailouts, failed items, failing operations, non-directive failing
+	// tests) so the run verdict reflects them even when the result-family
+	// summary is clean or absent (#24).
+	failures int
 
 	// Operation family (crap RFC 0001), keyed by the operation's tp: opName
 	// names the operation_end verdict; opCurrent and opBytes track the running
@@ -77,9 +82,28 @@ func (d *Driver) Run(r *ndjsoncrap.Reader) error {
 		d.feed(rec)
 	}
 	if !d.sawSummary {
-		d.s.Send(BatchDone{Err: streamErr})
+		d.s.Send(BatchDone{Err: d.runErr(streamErr)})
 	}
 	return streamErr
+}
+
+// runErr resolves the run verdict: a stream/summary error wins; otherwise any
+// failing verdicts seen along the way fail the run (#24).
+func (d *Driver) runErr(err error) error {
+	if err == nil && d.failures > 0 {
+		err = fmt.Errorf("%d failed", d.failures)
+	}
+	return err
+}
+
+// endPhase persists a verdict line, counting non-directive failures toward
+// the run verdict. Skip/todo directives are expected outcomes (TAP
+// semantics) and never fail the run.
+func (d *Driver) endPhase(desc string, v VerdictView) {
+	if !v.OK && v.Directive == nil {
+		d.failures++
+	}
+	d.s.Send(PhaseEnded{Description: desc, Verdict: v})
 }
 
 func (d *Driver) feed(rec ndjsoncrap.Record) {
@@ -101,14 +125,11 @@ func (d *Driver) feed(rec ndjsoncrap.Record) {
 				d.s.Send(LogLine{Text: line})
 			}
 		}
-		d.s.Send(PhaseEnded{Description: r.Description, Verdict: verdictFromTest(r)})
+		d.endPhase(r.Description, verdictFromTest(r))
 		d.s.Send(OperationProgress{Current: d.testsSeen})
 
 	case ndjsoncrap.Bailout:
-		d.s.Send(PhaseEnded{
-			Description: "Bail out! " + r.Message,
-			Verdict:     VerdictView{OK: false},
-		})
+		d.endPhase("Bail out! "+r.Message, VerdictView{OK: false})
 
 	case ndjsoncrap.Summary:
 		d.sawSummary = true
@@ -119,7 +140,7 @@ func (d *Driver) feed(rec ndjsoncrap.Record) {
 				err = fmt.Errorf("bailed out")
 			}
 		}
-		d.s.Send(BatchDone{Err: err})
+		d.s.Send(BatchDone{Err: d.runErr(err)})
 
 	case ndjsoncrap.NodeStart:
 		name := r.Name
@@ -140,7 +161,7 @@ func (d *Driver) feed(rec ndjsoncrap.Record) {
 	case ndjsoncrap.NodeEnd:
 		desc := d.nodeName[r.TP]
 		delete(d.nodeName, r.TP)
-		d.s.Send(PhaseEnded{Description: desc, Verdict: verdictFromNodeEnd(r)})
+		d.endPhase(desc, verdictFromNodeEnd(r))
 
 	case ndjsoncrap.OperationStart:
 		d.opName[r.TP] = r.Name
@@ -177,7 +198,7 @@ func (d *Driver) feed(rec ndjsoncrap.Record) {
 		delete(d.opBytes, r.Op)
 		desc := fmt.Sprintf("%s — %d done, %d skipped, %d failed",
 			name, r.Done, r.Skipped, r.Failed)
-		d.s.Send(PhaseEnded{Description: desc, Verdict: VerdictView{OK: r.OK}})
+		d.endPhase(desc, VerdictView{OK: r.OK})
 
 	case ndjsoncrap.Unknown:
 		// Forward compatibility: ignore record types we do not present.
@@ -194,6 +215,7 @@ func (d *Driver) feed(rec ndjsoncrap.Record) {
 func (d *Driver) feedItem(r ndjsoncrap.Item) {
 	switch r.State {
 	case ndjsoncrap.ItemFailed:
+		d.failures++
 		d.s.Send(ItemFailed{Label: r.Label, Diagnostic: r.Diagnostic})
 	case ndjsoncrap.ItemSkipped:
 		d.s.Send(LogLine{Text: "↷ " + r.Label})

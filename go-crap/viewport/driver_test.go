@@ -135,6 +135,55 @@ func TestDriverExecutionFamily(t *testing.T) {
 	}
 }
 
+// batchErr returns the Err of the single BatchDone in msgs, failing if none.
+func batchErr(t *testing.T, msgs []tea.Msg) error {
+	t.Helper()
+	for _, m := range msgs {
+		if bd, ok := m.(BatchDone); ok {
+			return bd.Err
+		}
+	}
+	t.Fatal("no BatchDone emitted")
+	return nil
+}
+
+// A failing execution node must fail the run verdict even when a clean
+// result-family summary follows (#24): producers that moved a unit from Test
+// to Phase+FailDiag per #22 must not render under a green final frame.
+func TestDriverFailedNodeFailsRunDespiteCleanSummary(t *testing.T) {
+	stream := strings.Join([]string{
+		`{"type":"node_start","tp":1,"name":"hook","namepath":"hook","depth":0,"parent":null,"doc":null,"quiet":false}`,
+		`{"type":"node_end","tp":1,"exit_code":1,"signal":null,"duration_ms":5,"diagnostic":{"error":"hook failed"}}`,
+		`{"type":"summary","passed":0,"failed":0,"skipped":0,"todo":0,"total":0,"plan_count":0,"bailed":false,"valid":true,"diagnostics":[]}`,
+	}, "\n")
+	if err := batchErr(t, drive(t, stream)); err == nil {
+		t.Fatal("failing node_end must fail the run despite a clean summary")
+	}
+}
+
+// On a summary-less stream (EOF path), failing nodes and failed operation
+// items must fail the run verdict (#24).
+func TestDriverFailuresFailRunOnEOF(t *testing.T) {
+	stream := strings.Join([]string{
+		`{"type":"node_start","tp":1,"name":"hook","namepath":"hook","depth":0,"parent":null,"doc":null,"quiet":false}`,
+		`{"type":"node_end","tp":1,"exit_code":1,"signal":null,"duration_ms":5}`,
+		`{"type":"operation_start","tp":2,"name":"sync","parent":null,"depth":0,"total":1,"bytes_total":0}`,
+		`{"type":"item","op":2,"label":"blob-a","state":"failed","bytes":0,"diagnostic":{"error":"boom"}}`,
+	}, "\n")
+	if err := batchErr(t, drive(t, stream)); err == nil {
+		t.Fatal("failures on a summary-less stream must fail the run")
+	}
+}
+
+// A not-ok test under a todo directive is an expected failure (TAP
+// semantics): it must NOT fail the run on the EOF path.
+func TestDriverTodoFailureDoesNotFailRun(t *testing.T) {
+	stream := `{"type":"test","n":1,"description":"flaky thing","ok":false,"directive":{"kind":"todo","reason":"wip"},"diagnostic":null,"output":null,"subtest":null,"line":1}`
+	if err := batchErr(t, drive(t, stream)); err != nil {
+		t.Fatalf("todo failure must not fail the run: %v", err)
+	}
+}
+
 // A node_end carrying a producer diagnostic (crap#22) must surface it in the
 // verdict, merged with the exit_code/signal synthesis.
 func TestDriverNodeEndDiagnostic(t *testing.T) {

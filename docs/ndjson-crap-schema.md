@@ -151,11 +151,18 @@ All fields are always present; nullable fields use `null`.
 ### `node_end`
 
 ```json
-{"type":"node_end","tp":1,"exit_code":0,"signal":null,"duration_ms":120}
+{"type":"node_end","tp":1,"exit_code":1,"signal":null,"duration_ms":120,"diagnostic":{"error":"hook failed","command":"just"}}
 ```
 
 - Exactly one of `exit_code` / `signal` is non-null for a process-backed node.
 - Success is `exit_code == 0` with `signal == null`.
+- `diagnostic` — OPTIONAL (default `null`): a JSON object carrying producer
+  verdict detail (failure summary, command, elapsed, resource link, …), shaped
+  like `test`'s `diagnostic`. SHOULD be `null`/absent on success. Presenters
+  merge it with their own exit-code/signal synthesis (producer keys win), so an
+  execution node is a self-sufficient verdict unit — producers MUST NOT pair a
+  node with a duplicate result-family `test` record just to carry a diagnostic.
+  Absent in just-us streams (the field is additive; absent decodes to null).
 
 ## Forward compatibility
 

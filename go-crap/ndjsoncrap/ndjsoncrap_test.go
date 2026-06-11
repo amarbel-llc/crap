@@ -119,6 +119,40 @@ func TestDecodeNodeEndSignal(t *testing.T) {
 	}
 }
 
+// A node_end may carry a producer diagnostic (crap#22); it must round-trip,
+// and a stream without the field must decode it to nil (forward compat).
+func TestNodeEndDiagnosticRoundTrip(t *testing.T) {
+	var buf bytes.Buffer
+	w := NewWriter(&buf)
+	code := 1
+	if err := w.Write(NodeEnd{
+		TP:         1,
+		ExitCode:   &code,
+		Diagnostic: map[string]any{"error": "hook failed", "command": "just"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	rec, err := NewReader(&buf).Next()
+	if err != nil {
+		t.Fatal(err)
+	}
+	n, ok := rec.(NodeEnd)
+	if !ok {
+		t.Fatalf("got %T want NodeEnd", rec)
+	}
+	if n.Diagnostic["error"] != "hook failed" || n.Diagnostic["command"] != "just" {
+		t.Fatalf("diagnostic lost in round-trip: %#v", n.Diagnostic)
+	}
+
+	rec, err = Decode([]byte(`{"type":"recipe_complete","tp":1,"exit_code":0,"signal":null,"duration_ms":5}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := rec.(NodeEnd); n.Diagnostic != nil {
+		t.Fatalf("absent diagnostic must decode to nil: %#v", n.Diagnostic)
+	}
+}
+
 // Unknown record types must decode to Unknown, not error (forward compat).
 func TestDecodeUnknownType(t *testing.T) {
 	rec, err := Decode([]byte(`{"type":"future_thing","whatever":42}`))

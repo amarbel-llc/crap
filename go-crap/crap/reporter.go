@@ -244,11 +244,20 @@ func (p *Phase) Done() {
 // Fail closes the node with a failure verdict; a non-nil err is first emitted
 // as a stderr output line so it surfaces in the verdict's held tail.
 func (p *Phase) Fail(err error) {
+	p.FailDiag(err, nil)
+}
+
+// FailDiag is Fail with a producer diagnostic riding on the node_end
+// (crap#22), so the node is a self-sufficient verdict unit: the viewport
+// renders the diagnostic under the ✗ line, merged with its exit_code/signal
+// synthesis. Use it instead of pairing the phase with a result-family Test
+// record.
+func (p *Phase) FailDiag(err error, diagnostic map[string]any) {
 	if err != nil {
 		p.r.write(ndjsoncrap.Output{TP: p.tp, Stream: ndjsoncrap.StreamStderr, Data: err.Error() + "\n"})
 	}
 	code := 1
-	p.r.write(ndjsoncrap.NodeEnd{TP: p.tp, ExitCode: &code, DurationMs: p.elapsed()})
+	p.r.write(ndjsoncrap.NodeEnd{TP: p.tp, ExitCode: &code, DurationMs: p.elapsed(), Diagnostic: diagnostic})
 }
 
 func (p *Phase) elapsed() uint64 { return uint64(time.Since(p.start).Milliseconds()) }

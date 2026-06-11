@@ -218,7 +218,8 @@ func verdictFromTest(t ndjsoncrap.Test) VerdictView {
 
 // verdictFromNodeEnd resolves an execution-family node_end to a view
 // verdict: success is exit 0 with no signal; otherwise the exit code or
-// signal is surfaced as the diagnostic.
+// signal is synthesized into the diagnostic and merged with the producer's
+// own diagnostic, producer keys winning (crap#22).
 func verdictFromNodeEnd(n ndjsoncrap.NodeEnd) VerdictView {
 	ok := n.Signal == nil && n.ExitCode != nil && *n.ExitCode == 0
 	if ok {
@@ -230,6 +231,9 @@ func verdictFromNodeEnd(n ndjsoncrap.NodeEnd) VerdictView {
 		diag["signal"] = *n.Signal
 	case n.ExitCode != nil:
 		diag["exit_code"] = *n.ExitCode
+	}
+	for k, v := range n.Diagnostic {
+		diag[k] = v
 	}
 	return VerdictView{OK: false, Diagnostic: diag}
 }

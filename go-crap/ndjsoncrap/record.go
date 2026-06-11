@@ -170,13 +170,17 @@ func (Output) RecordType() string { return "output" }
 
 // NodeEnd is the execution-family node-end record (just-us
 // recipe_complete). Exactly one of exit_code / signal is non-null for a
-// process-backed node.
+// process-backed node. Diagnostic optionally carries producer verdict detail
+// (failure summary, command, elapsed, …) shaped like Test.Diagnostic; it is
+// omitted when nil, so just-us and pre-crap#22 streams stay byte-identical,
+// and an absent field decodes to nil (forward compat).
 type NodeEnd struct {
-	Type       string  `json:"type"` // "node_end"
-	TP         int     `json:"tp"`
-	ExitCode   *int    `json:"exit_code"`
-	Signal     *string `json:"signal"`
-	DurationMs uint64  `json:"duration_ms"`
+	Type       string         `json:"type"` // "node_end"
+	TP         int            `json:"tp"`
+	ExitCode   *int           `json:"exit_code"`
+	Signal     *string        `json:"signal"`
+	DurationMs uint64         `json:"duration_ms"`
+	Diagnostic map[string]any `json:"diagnostic,omitempty"`
 }
 
 func (NodeEnd) RecordType() string { return "node_end" }

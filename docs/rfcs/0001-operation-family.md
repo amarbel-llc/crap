@@ -344,7 +344,16 @@ func (p *Phase) Command(cmd string)            // command
 func (p *Phase) Output(stream, data string)    // output
 func (p *Phase) Done()                         // node_end exit 0
 func (p *Phase) Fail(err error)                // node_end nonzero / verdict
+func (p *Phase) FailDiag(err error, diagnostic map[string]any) // Fail + node_end diagnostic
 ```
+
+> **Amendment (2026-06-11, crap#22).** `node_end` gained an OPTIONAL
+> `diagnostic` field ([ndjson-crap v1] schema) so an execution node is a
+> self-sufficient verdict unit: producers attach the failure detail (summary,
+> command, elapsed, resource link, …) to the node instead of pairing it with a
+> duplicate result-family `test` record. `FailDiag` is the reporter surface
+> for it; conformant presenters merge the producer diagnostic with their
+> exit-code/signal synthesis (producer keys win) on the failure verdict.
 
 - The `Operation` MUST tally `done`/`skipped`/`failed` from `Item`/`Skip`/`Fail`
   calls and emit them in `operation_end` at `Finish`; callers MUST NOT compute

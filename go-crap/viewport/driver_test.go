@@ -135,6 +135,32 @@ func TestDriverExecutionFamily(t *testing.T) {
 	}
 }
 
+// A node_end carrying a producer diagnostic (crap#22) must surface it in the
+// verdict, merged with the exit_code/signal synthesis.
+func TestDriverNodeEndDiagnostic(t *testing.T) {
+	stream := strings.Join([]string{
+		`{"type":"node_start","tp":1,"name":"pre-merge hook","namepath":"pre-merge hook","depth":0,"parent":null,"doc":null,"quiet":false}`,
+		`{"type":"node_end","tp":1,"exit_code":1,"signal":null,"duration_ms":480,"diagnostic":{"command":"just","error":"hook failed"}}`,
+	}, "\n")
+	msgs := drive(t, stream)
+	for _, m := range msgs {
+		if pe, ok := m.(PhaseEnded); ok {
+			if pe.Verdict.OK {
+				t.Fatalf("exit 1 must fail: %#v", pe.Verdict)
+			}
+			d := pe.Verdict.Diagnostic
+			if d["command"] != "just" || d["error"] != "hook failed" {
+				t.Fatalf("producer diagnostic not merged into verdict: %#v", d)
+			}
+			if d["exit_code"] != 1 {
+				t.Fatalf("exit_code synthesis lost in merge: %#v", d)
+			}
+			return
+		}
+	}
+	t.Fatal("no PhaseEnded emitted")
+}
+
 // base64 output must be decoded before feeding the tail.
 func TestDriverBase64Output(t *testing.T) {
 	// "hi there\n" base64 == "aGkgdGhlcmUK"
@@ -221,6 +247,26 @@ func TestDriverOperationFamily(t *testing.T) {
 	}
 	if !sawDone {
 		t.Fatal("driver must finalize a summary-less operation stream")
+	}
+}
+
+// presentPlain must print a node_end's producer diagnostic under the verdict
+// (crap#22), alongside the synthesized exit_code.
+func TestPresentPlainNodeEndDiagnostic(t *testing.T) {
+	stream := strings.Join([]string{
+		`{"type":"node_start","tp":1,"name":"pre-merge hook","namepath":"pre-merge hook","depth":0,"parent":null,"doc":null,"quiet":false}`,
+		`{"type":"node_end","tp":1,"exit_code":1,"signal":null,"duration_ms":480,"diagnostic":{"error":"hook failed"}}`,
+	}, "\n")
+	var buf strings.Builder
+	if err := Present(strings.NewReader(stream), Options{Out: &buf, IsTTY: false}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	if !strings.Contains(got, "✗ pre-merge hook") {
+		t.Fatalf("plain output missing verdict:\n%s", got)
+	}
+	if !strings.Contains(got, "error: hook failed") || !strings.Contains(got, "exit_code: 1") {
+		t.Fatalf("plain output missing merged diagnostic:\n%s", got)
 	}
 }
 

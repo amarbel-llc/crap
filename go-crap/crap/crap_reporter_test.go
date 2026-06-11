@@ -97,6 +97,34 @@ func TestReporterTestStreamRoundTrip(t *testing.T) {
 	}
 }
 
+// FailDiag must close the node with a nonzero node_end carrying the producer
+// diagnostic (crap#22), with a non-nil err still surfacing as stderr output.
+func TestReporterPhaseFailDiag(t *testing.T) {
+	var buf bytes.Buffer
+	r := NewReporter(&buf, ReporterOptions{})
+	ph := r.Phase("pre-merge hook")
+	ph.FailDiag(errors.New("hook failed"), map[string]any{
+		"command": "just",
+		"elapsed": "48s",
+	})
+
+	recs := collect(t, r, &buf)
+	// node_start, stderr output (from err), node_end.
+	if len(recs) != 3 {
+		t.Fatalf("record count: got %d want 3", len(recs))
+	}
+	if o, ok := recs[1].(ndjsoncrap.Output); !ok || o.Stream != ndjsoncrap.StreamStderr {
+		t.Fatalf("FailDiag should emit the error as stderr output first: %#v", recs[1])
+	}
+	ne, ok := recs[2].(ndjsoncrap.NodeEnd)
+	if !ok || ne.ExitCode == nil || *ne.ExitCode != 1 {
+		t.Fatalf("FailDiag node_end should be nonzero: %#v", recs[2])
+	}
+	if ne.Diagnostic["command"] != "just" || ne.Diagnostic["elapsed"] != "48s" {
+		t.Fatalf("FailDiag diagnostic not carried on node_end: %#v", ne.Diagnostic)
+	}
+}
+
 // The Phase API must emit conformant execution-family records, including a
 // nested phase under an operation (parent linkage threaded by the Reporter).
 func TestReporterPhaseAndNesting(t *testing.T) {

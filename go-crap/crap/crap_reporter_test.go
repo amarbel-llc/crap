@@ -125,6 +125,23 @@ func TestReporterPhaseFailDiag(t *testing.T) {
 	}
 }
 
+// FailDiag with a nil err must emit no stderr output record — just the
+// node_end with the diagnostic.
+func TestReporterPhaseFailDiagNilErr(t *testing.T) {
+	var buf bytes.Buffer
+	r := NewReporter(&buf, ReporterOptions{})
+	r.Phase("pre-merge hook").FailDiag(nil, map[string]any{"error": "hook failed"})
+
+	recs := collect(t, r, &buf)
+	if len(recs) != 2 {
+		t.Fatalf("nil err must not emit an output record: %#v", recs)
+	}
+	ne, ok := recs[1].(ndjsoncrap.NodeEnd)
+	if !ok || ne.ExitCode == nil || *ne.ExitCode != 1 || ne.Diagnostic["error"] != "hook failed" {
+		t.Fatalf("node_end: %#v", recs[1])
+	}
+}
+
 // The Phase API must emit conformant execution-family records, including a
 // nested phase under an operation (parent linkage threaded by the Reporter).
 func TestReporterPhaseAndNesting(t *testing.T) {

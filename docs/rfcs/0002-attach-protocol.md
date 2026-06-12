@@ -569,17 +569,22 @@ producer supporting both MUST prefer the explicit flag when given.
 
 ## Conformance Testing
 
-The prototype lives in **just-us**. The first-draft prototype (pushed on
-this branch) validated the protocol *semantics* end to end over the
-superseded fd transport: ambient `CRAP=2` detection with silent
-degradation, hello-then-records, lineage nesting across a two-justfile
-tree, garbage capture, backtick withdrawal, explicit-flag precedence, and
-acceptance by the canonical consumers (`crap-present` rendering,
-`:: validate` 16/16 records). Reworking it to this draft — `attach()`
-connect-or-birth, the granted-base client, and an embedded re-exec/fork
-server (plus `crap-present --serve` and the `go-crap`/`rust-crap` attach
-libraries on the crap side) — is the tracked next step; the requirement
-map below is written against this draft.
+The prototype lives in **just-us** (`src/crap_attach.rs` +
+`src/crap_serve.rs`; design record in its FDR 0002) and implements this
+draft: `attach()` connect-or-birth with the deny/absence distinction,
+granted bases (first connection emits plain `1..n`), the embedded
+re-exec-self server (splice loop, lease and refcount lifetimes,
+tty-keyed election with flock reclaim of stale paths, `crap-present` as
+the terminal output stage when present), child scoping via
+`CRAP_PARENT`, garbage capture, and evaluation-child withdrawal.
+Smoke-verified end to end: a nested two-justfile merged stream passes
+`:: validate` and renders via `crap-present`; a dead sink re-roots; two
+parallel roofless roots on one pty converge on one server as sibling
+top-level trees. Known gaps, recorded in the FDR: the §6.1 scope check
+at accept is not yet enforced, and the `go-crap`/`rust-crap` attach
+libraries plus `crap-present --serve` on the crap side remain to be
+built. The requirement map below is the spec for the pending bats lane
+(bats/nix unavailable in the authoring container).
 
 | Requirement | Test | Description |
 | --- | --- | --- |

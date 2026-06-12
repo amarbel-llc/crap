@@ -36,7 +36,10 @@ inherited. A node with no sink above it is a **root**: it *births* the
 server (forking and becoming it, re-exec'ing its own binary into it, or
 exec'ing a shipped one), which owns the socket, grants each connection a
 disjoint deterministic id base, splices record lines to one merged output
-in arrival order, and cleans itself up when its birth lease drops. Children
+in arrival order, and cleans itself up when its birth lease drops.
+Attachment is scoped to the process tree: the server admits only peers
+descended from its spawner, and everything outside — leaked offers,
+detached daemons — is denied and reverts to dumb output. Children
 that never attach emit **garbage** — plain stdio — which their parent
 captures and wraps as `output` records, so the tree is complete either way.
 No randomness, no shared-descriptor write discipline, no per-hop pumping
@@ -175,11 +178,17 @@ A node, at startup:
    **unattached**: it MUST behave exactly as if the protocol did not
    exist, and MUST NOT modify any `CRAP*` variable for its children.
 2. If `CRAP_SINK` is set: connect to it and perform the grant exchange
-   (Section 4). On *any* failure — missing socket, refused connection,
-   malformed grant, unsupported granted format — the node MUST proceed as
-   if `CRAP_SINK` were absent (step 3). A dead ancestor sink thus causes
-   the subtree to re-root rather than go dark: severability doubles as
-   the failure mode.
+   (Section 4). Failures divide by what they evidence:
+   - **No server there** — missing socket, connection refused: the node
+     MUST proceed as if `CRAP_SINK` were absent (step 3). A dead
+     ancestor sink causes the subtree to re-root rather than go dark:
+     severability doubles as the failure mode.
+   - **A server said no** — a deny grant, EOF before any grant, a
+     malformed grant, or an unsupported granted format: the node MUST
+     degrade to **unattached** (dumb output). A live server's refusal
+     means this node is not part of that tree (Section 4, scoped
+     attachment); it must not respond by birthing a surprise server of
+     its own.
 3. If `CRAP_SINK` is not set (or step 2 failed): the node is a root. It
    MUST birth a server (Section 6), connect to it as a client, and export
    the new `CRAP_SINK` to its children. A node that cannot birth (e.g.
@@ -201,11 +210,33 @@ node never has to guess, an incapable or unlucky one never breaks the run.
 Connections are point-to-point and framed by the transport, which is what
 makes writer identity free. The protocol on each connection:
 
+**Scoped attachment.** Attachment is scoped to the server's process
+tree: a node MUST NOT attach unless the server's spawner is among its
+ancestors at attach time. The offer travels only by parent→child
+inheritance — nodes MUST NOT persist `CRAP_SINK` to files, session
+managers, or anything else that outlives the run — and a process that
+has detached from the tree (daemonized, reparented out) has no license
+to attach. Outside the tree there are exactly two legitimate behaviors:
+dumb output (garbage, captured and wrapped by whatever runs you) or
+root-electing a tree of your own. Servers enforce this at accept
+(Section 6.1) and answer trespassers with a deny grant.
+
 **Grant (server → client, exactly one line, immediately on accept):**
 
 ```json
 {"type":"crap","version":2,"base":0,"format":"ndjson-crap/1"}
 ```
+
+or, when the peer fails the scope check (or any other admission rule):
+
+```json
+{"type":"crap","version":2,"deny":"scope"}
+```
+
+A denied client MUST close the connection and degrade to unattached
+(Section 3). Denial is distinct from absence by construction: a missing
+or refused socket means "no tree here — re-root", an answered denial
+means "a tree is here and you are not in it — dumb output".
 
 - `version` (REQUIRED) — the CRAP major the server speaks.
 - `base` (REQUIRED) — the id base granted to this connection. The client
@@ -296,8 +327,19 @@ The server is deliberately *not* a structurer. It MUST:
 
 1. Own one listening unix-domain socket (bound by itself, or received
    pre-bound from its spawner — see 6.2).
-2. On each accept, write the grant (Section 4) with a fresh disjoint
-   base.
+2. On each accept, check scope, then grant. The server SHOULD verify via
+   peer credentials (`SO_PEERCRED` on Linux, `LOCAL_PEERPID` on macOS,
+   platform equivalents elsewhere) that the connecting process descends
+   from the server's spawner — walking the peer's parent chain to the
+   spawner's pid — and answer a deny grant (Section 4) on failure.
+   Checking at *accept time* gives the right temporal semantics for
+   free: a process must be in the tree when it joins (a daemonized
+   stray that connects after detaching is refused), while a legitimate
+   node whose intermediate parent later exits keeps the connection it
+   was already granted. The check is admission hygiene, not a security
+   boundary (Security Considerations); platforms without peer
+   credentials MAY grant unchecked. Admitted connections get the grant
+   with a fresh disjoint base.
 3. Splice complete lines from all connections to its single merged output
    in arrival order — atomically per line, which is trivial since it is
    the only writer. It MUST NOT reorder, MUST NOT rewrite, and need not
@@ -311,7 +353,9 @@ The server is deliberately *not* a structurer. It MUST:
    open connections, flushes, unlinks its socket, and exits. The kernel
    closes descriptors on any process death, so cleanup survives even
    `SIGKILL` of the spawner. The server owns its socket file: it unlinks
-   it on every exit path.
+   it on every exit path. Draining SHOULD be bounded by a grace timeout
+   so a stray connection held by a process that outlived the tree delays
+   exit, not prevents it.
 
 The merged output goes wherever the spawner pointed the server's stdout at
 birth: a pipe (`CRAP=2 just build | crap-present` — the pipe carries the
@@ -393,6 +437,15 @@ presenter renders. A node whose ancestor sink died re-roots automatically
 edges carry nothing (records flow point-to-point), so severability is
 "cut and re-run/re-root", not "wiretap a live edge".
 
+**Scoped.** The two invariants are bounded by a third property: the
+process tree is the unit of attachment. A node attaches to a given sink
+iff the sink's spawner is its ancestor at attach time (Section 4);
+everything outside that tree — leaked environments in other terminals,
+daemons that detached mid-run, processes sourcing a stale env snapshot —
+reverts to dumb output, or root-elects a tree of its own. Composition
+never crosses tree boundaries by accident, and severed pieces cannot
+half-rejoin a tree they no longer belong to.
+
 ### 8. Relationship to existing opt-in flags
 
 `just --events-fd N` / `JUST_EVENTS_FD` ([eng RFC 0002]) is unchanged:
@@ -414,7 +467,14 @@ producer supporting both MUST prefer the explicit flag when given.
   same boundary the user's processes already share. Servers MUST NOT
   grant to, and SHOULD NOT accept from, peers they cannot restrict by
   filesystem permission; abstract-namespace sockets are excluded for
-  exactly this reason.
+  exactly this reason. The scope check (Sections 4, 6.1) tightens this
+  from "same user" to "same tree" against *accidents* — leaked offers,
+  stale env snapshots, detached daemons — but it is hygiene, not a
+  security boundary: peer-pid ancestry walks are subject to pid-reuse
+  races and parent-chain mutation, and a same-user attacker can defeat
+  them (as they can defeat anything, via ptrace). Display integrity
+  against same-user accidents is the claim; isolation against same-user
+  malice is not.
 - **Hostile or buggy clients.** The server's inputs are attacker-grade by
   construction. It MUST bound per-connection buffers and connection
   counts; the splice design means a malicious client can at worst pollute
@@ -445,8 +505,10 @@ map below is written against this draft.
 | --- | --- | --- |
 | §3 `CRAP=2` alone roots and serves | bats | `CRAP=2 just build > f` yields one merged stream; first connection's ids are `1..n` |
 | §3 degradation | unit | `CRAP` absent / `CRAP=3` / birth failure ⇒ behavior unchanged |
-| §3 dead sink re-roots | bats | stale `CRAP_SINK` ⇒ subtree births its own server, stream complete |
+| §3 dead sink re-roots | bats | stale `CRAP_SINK` (socket gone) ⇒ subtree births its own server, stream complete |
+| §3/§4 denial means dumb output | unit | deny grant / EOF-before-grant ⇒ unattached, no surprise server |
 | §4 grant shape and base discipline | unit | grant precedes records; bases disjoint; client ids = base+n |
+| §6.1 scope check at accept | unit | non-descendant peer gets `deny:"scope"`; in-tree peer whose parent later exits keeps its connection |
 | §5 connect-before-spawn | unit | no child env export / spawn before the grant is read; serial runs grant identical bases run-to-run |
 | §5 child scoping | bats | nested `just` records carry `parent` = outer recipe id via its own connection |
 | §5 garbage capture | bats | unattached child stdio arrives as `output` records under its node |

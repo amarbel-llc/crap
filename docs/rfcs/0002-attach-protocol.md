@@ -240,6 +240,16 @@ majoring on incompatibility.
 
 An attached node:
 
+- **Connects before it spawns.** A node MUST NOT start any child that
+  inherits the offer until its own attachment has completed — connection
+  established, grant received (and, for a root, `CRAP_SINK` exported).
+  This single rule carries three guarantees: a root's children always see
+  a live sink; a parent can flush its `node_start` before the child
+  exists, so parent-before-child holds at the server by arrival order
+  with no reordering logic; and the server's accept order follows spawn
+  order wherever execution is serial, so granted bases are
+  **deterministic for serial trees** — the common case — not just for
+  single producers.
 - **Scopes its children.** For each child it executes whose output should
   nest, it MUST set `CRAP_PARENT` to the id of the execution node it
   allocated for that child (the `node_start` it emitted when launching
@@ -264,10 +274,19 @@ An attached node:
   while attached continue to do so — that is the garbage duty, not a
   contradiction.)
 
-Ordering needs no further rules: a node flushes its `node_start` before
-spawning the child, and the child cannot connect before it is spawned, so
-parent-before-child reaches the server in arrival order; everything else
-is demux-by-id, which [ndjson-crap v1] consumers already perform.
+Ordering needs no further rules: connect-before-spawn means a node
+flushes its `node_start` before the child exists, and the child cannot
+connect before it is spawned, so parent-before-child reaches the server
+in arrival order; everything else is demux-by-id, which [ndjson-crap v1]
+consumers already perform.
+
+Note that parent-assigned monotonic child identity is already present in
+the design rather than needing a new mechanism: the `CRAP_PARENT` value a
+node hands each child invocation *is* a deterministic monotonic
+identifier — `base + n` with `n` advancing in spawn order within the
+parent's granted base. Every record's parent chain is therefore fully
+deterministic; the granted base values are the only labels that can vary,
+and only where execution is genuinely parallel (Section 7).
 
 ### 6. The server: birthed, small, self-cleaning
 
@@ -351,14 +370,20 @@ spinclass merge            (harness: exports CRAP=2, reads merged stream)
 ```
 
 is one merged stream whose `parent` links reproduce the process tree;
-check marks nest accordingly. Two aware tools launched *in parallel* by an
-unaware script inherit identical context — neither can deterministically
-pick a distinct index, and no handed-down path can fix that (a
-coordination-free pigeonhole) — but each gets its own connection, hence
-its own granted base: uniqueness comes from connection identity, lineage
-from the shared `CRAP_PARENT`, and the only nondeterminism is which
-sibling gets which base (accept order). That irreducible residue is a
-label, not a structure.
+check marks nest accordingly. With connect-before-spawn (Section 5),
+accept order follows spawn order through any serially-executing chain, so
+the whole tree's ids are deterministic run to run wherever execution is
+serial. The residue is confined to genuine parallelism under an *unaware*
+intermediary: two aware tools launched in parallel by an unaware script
+inherit identical context — neither can deterministically pick a distinct
+index, and no handed-down path or parent-assigned counter can fix that (a
+coordination-free pigeonhole; the parent's monotonic identifiers stop at
+the invocation it actually made, and both racers live inside one
+invocation). Each still gets its own connection, hence its own granted
+base: uniqueness comes from connection identity, lineage from the shared
+`CRAP_PARENT`, and the only nondeterminism left is which racer gets which
+base — a label, not a structure, and exactly as racy as the siblings'
+real execution order already was.
 
 **Severable.** Severing is **root-election**: run any subtree without an
 inherited `CRAP_SINK` — a debugging shell, a CI job, a cron entry — and it
@@ -422,6 +447,7 @@ map below is written against this draft.
 | §3 degradation | unit | `CRAP` absent / `CRAP=3` / birth failure ⇒ behavior unchanged |
 | §3 dead sink re-roots | bats | stale `CRAP_SINK` ⇒ subtree births its own server, stream complete |
 | §4 grant shape and base discipline | unit | grant precedes records; bases disjoint; client ids = base+n |
+| §5 connect-before-spawn | unit | no child env export / spawn before the grant is read; serial runs grant identical bases run-to-run |
 | §5 child scoping | bats | nested `just` records carry `parent` = outer recipe id via its own connection |
 | §5 garbage capture | bats | unattached child stdio arrives as `output` records under its node |
 | §6.1 splice atomicity and arrival order | unit | concurrent clients' lines never interleave mid-line; parent `node_start` precedes child records |

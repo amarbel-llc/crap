@@ -76,14 +76,15 @@ normative spec (records, driver mapping, and the producer reporter API).
 
 The CRAP attach protocol
 ([`docs/rfcs/0002-attach-protocol.md`](rfcs/0002-attach-protocol.md))
-lets a harness advertise — via `CRAP=2` plus optional
-`CRAP_FD`/`CRAP_ACCEPT`/`CRAP_PARENT`/`CRAP_DEPTH` — that it consumes
-this format, with recursive re-offers so a process tree nests in one
-stream. It amends this schema additively: the `crap` header gains
-OPTIONAL `format`/`producer`/`parent`/`sid`/`transport` fields (the
-*hello*), result-family records gain an OPTIONAL `parent` for lineage
-under an execution node, and ambient-attached producers draw `tp`s from
-a random base (this schema requires only stream-uniqueness).
+lets a harness advertise — via a single `CRAP=2` environment variable —
+that it consumes this format. Attached nodes are clients of a sink
+server (a unix socket birthed by the tree's root) that grants each
+connection a disjoint node-id base and splices record lines into one
+merged stream, so a process tree nests via the existing
+`tp`/`parent` lineage. It amends this schema additively:
+result-family records gain an OPTIONAL `parent` for lineage under an
+execution node, and node ids may start from a granted base (this
+schema requires only stream-uniqueness).
 
 ## Record schemas
 

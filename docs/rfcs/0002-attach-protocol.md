@@ -3,82 +3,89 @@ status: draft
 date: 2026-06-11
 ---
 
-<!-- crap RFC 0002 (crap-local RFC series). Design sketch — the protocol
-     core is implemented as a prototype in just-us (see Conformance
-     Testing); the go-crap `attach` package and `:: attach` are future
-     work. Home: docs/rfcs/0002-attach-protocol.md.
+<!-- crap RFC 0002 (crap-local RFC series). Second draft, same day:
+     supersedes the fd-passthrough first draft after design review (see
+     Design History). The first draft's just-us prototype validated the
+     semantics (lineage nesting, garbage capture, degradation, viewport
+     compatibility) and is superseded on transport; rework tracked in
+     Conformance Testing. Home: docs/rfcs/0002-attach-protocol.md.
      Note: "crap RFC 000N" = this repo's series; "eng RFC 000N" = the
      eng-wide protocol series (0002 = just-us --events-fd). -->
 
-# CRAP Attach Protocol: Harness Detection, Content Negotiation, and Recursive Structured-Output Trees
+# CRAP Attach Protocol: Recursive Structured-Output Trees over a Birthed Sink Server
 
 ## Abstract
 
 A program that can emit `ndjson-crap` has no way to learn whether the thing
-running it wants that — so today every producer needs an explicit opt-in flag
-(`just --events-fd 3`, `:: go-test`), and a tree of programs cannot compose
-into one nested stream without each layer being hand-wired. This RFC
-specifies the **CRAP attach protocol**. Its core is a single environment
-variable: a harness that accepts CRAP-2 structured output exports `CRAP=2`,
-and a capable program detects it, announces itself with a one-line JSON
-*hello*, and emits its stream — by default on stdout, so
-`CRAP=2 just build | crap-present` is the whole deployment. Optional
-variables refine the offer: `CRAP_FD` moves the channel off stdout,
-`CRAP_ACCEPT` negotiates among formats (enabling future alternatives such as
-a compact binary encoding), and `CRAP_PARENT`/`CRAP_DEPTH` make the protocol
-**recursive** — an attached producer re-offers to its own children, so a
-process tree (subprocesses, or shell-managed pipes deep inside it)
-materializes as a nested node tree in a single stream, and check marks nest
-to mirror the processes that produced them. Unaware programs ignore the
-environment and degrade silently, in the spirit of the kitty graphics
-protocol's capability model; the offer/announce negotiation follows
-HashiCorp's go-plugin handshake, whose out-of-band transport rendezvous is
-reserved here for future formats.
+running it wants that — so today every producer needs an explicit opt-in
+flag (`just --events-fd 3`, `:: go-test`), and a tree of programs cannot
+compose into one nested stream without each layer being hand-wired. This
+RFC specifies the **CRAP attach protocol** around two invariants:
+
+- **Composable** — any aware node drops under any other (including through
+  unaware shells, wrappers, and parallel siblings) and the combined run
+  yields one coherent tree.
+- **Severable** — cut the tree anywhere; the severed subtree, run on its
+  own, still produces a complete, viewport-renderable crap stream.
+
+The model is a recursive function with a strict boundary. A harness offers
+with one environment variable, `CRAP=2`. Every attached node is only ever a
+**client**: it connects to the **sink** — a unix-domain-socket server — and
+writes its records there, rooted under the `CRAP_PARENT` node id it
+inherited. A node with no sink above it is a **root**: it *births* the
+server (forking and becoming it, re-exec'ing its own binary into it, or
+exec'ing a shipped one), which owns the socket, grants each connection a
+disjoint deterministic id base, splices record lines to one merged output
+in arrival order, and cleans itself up when its birth lease drops. Children
+that never attach emit **garbage** — plain stdio — which their parent
+captures and wraps as `output` records, so the tree is complete either way.
+No randomness, no shared-descriptor write discipline, no per-hop pumping
+chain: connections carry identity, and the server is small enough to embed
+in every node's client library.
 
 ## Introduction
 
-The CRAP-2 ecosystem already has the *wire format* (ndjson-crap, [ndjson-crap
-v1]), the *presenter* (the viewport / `crap-present`), and several
-*producers* (just-us `--events-fd` per [eng RFC 0002], the `::` converters,
-the `crap.Reporter` consumers). What it lacks is the *introduction*: a
-producer must be told, per invocation, that a structured consumer exists and
-where to write. Three consequences:
+The CRAP-2 ecosystem has the *wire format* (ndjson-crap, [ndjson-crap v1]),
+the *presenter* (the viewport / `crap-present`), and several *producers*
+(just-us `--events-fd` per [eng RFC 0002], the `::` converters, the
+`crap.Reporter` consumers). What it lacks is the *introduction*: a producer
+must be told, per invocation, that a structured consumer exists and where
+to write. Consequently there is no ambient detection (a program cannot ask
+"does my harness speak ndjson-crap?" the way a terminal program asks "does
+my terminal render graphics?" — [kitty-graphics] answers that for
+terminals; this protocol uses the environment, the same out-of-band channel
+`TERM` itself uses), no recursion (a crap-aware tool running another
+crap-aware tool flattens the inner tool's structure into captured bytes),
+and no evolution path for the wire format.
 
-1. **No ambient detection.** `just` run by spinclass's merge viewport emits
-   human text unless the caller remembered `--events-fd`. A program cannot
-   ask "does my harness speak ndjson-crap?" the way a terminal program asks
-   "does my terminal render graphics?" ([kitty-graphics] solves this for
-   terminals with an in-band query/response; pipes are unidirectional, so
-   this protocol uses the environment — the same out-of-band channel `TERM`
-   itself uses, and `CRAP=2` is deliberately `TERM`-shaped).
-2. **No recursion.** When a crap-aware tool runs another crap-aware tool
-   (spinclass → just → `:: go-test`; or a recipe whose body is a shell
-   pipeline ending in a producer), the inner tool's structure is flattened
-   into captured `output` bytes. The process tree is lost exactly where it
-   is most interesting.
-3. **No negotiation.** ndjson-crap is the only format, by fiat. A future
-   compact binary encoding, or a consumer that only renders some record
-   families, has no way to be introduced incrementally.
+This RFC's stance on degradation is kitty's: unaware programs ignore the
+environment and behave normally, and the offer tunnels through them
+untouched, so capability detection costs the harness one `setenv` and
+costs everyone else nothing.
 
-[go-plugin] solved the same problems for plugin processes: the host exports
-a magic-cookie environment variable (detection), exports the protocol
-versions it supports (negotiation), and the plugin prints a single handshake
-line announcing its chosen version and transport rendezvous (announcement).
-This RFC adapts that shape to streaming telemetry: the offer is the
-environment, the announcement is the first line on the offered channel, and
-— because the v1 transport is simply "the channel you were handed" — the
-handshake line and the data share it. The go-plugin-style out-of-band
-rendezvous (plugin opens a socket and names it in the handshake) is reserved
-as the negotiated escape hatch for formats that need a private or
-bidirectional channel (Section 8).
+### Design history (informative)
 
-Scope: this RFC defines (1) the offer environment variables, (2) producer
-detection and degradation rules, (3) format negotiation and the hello
-record, (4) the recursive re-offer rules (passthrough and mux) including the
-shared-channel write discipline, and (5) small additive amendments to
-[ndjson-crap v1] (hello header fields; optional result-family lineage). A Go
-helper package (`go-crap/attach`) and an `:: attach` CLI affordance are
-sketched informatively. The prototype implementation lives in just-us.
+Three models were worked through; the residue of each survives here.
+
+1. **Shared-fd passthrough** (first draft of this RFC; prototyped in
+   just-us). The harness offered a writable descriptor; producers attached
+   and re-offered the same descriptor to children. Nesting worked and was
+   validated end to end, but the *anonymous* shared channel forced three
+   producer burdens: random id bases (uncoordinated global uniqueness),
+   single-`write(2)` records ≤ `PIPE_BUF`, and output chunking. A
+   go-plugin-style out-of-band transport rendezvous was reserved for
+   later.
+2. **Pure recursive mux** (stdout only; every node merges its children's
+   stdout). Strict boundaries and natural severability, but two flaws:
+   liveness depends on every intermediary pumping promptly, and unaware
+   intermediaries reintroduce the multi-writer channel anyway (two aware
+   tools run in parallel by an unaware script share its inherited stdout).
+3. **Client/birthed-server** (this draft). The sink is a socket server
+   spawned by the root. Connections give writers identity, which dissolves
+   the randomness and the write discipline; clients write point-to-point,
+   which dissolves the pumping chain; root-election gives severability.
+   The go-plugin rendezvous machinery is dropped — once the sink is a
+   server, the only thing the environment must carry is its address.
 
 ## Requirements Language
 
@@ -88,467 +95,389 @@ document are to be interpreted as described in RFC 2119.
 
 ## Specification
 
-### 1. Roles
+### 1. Model and roles
 
-- **Harness** — a process that consumes structured output: spinclass's merge
-  viewport, `crap-present` at the end of a pipeline, a CI annotator, an
-  agent harness. The harness *offers*.
-- **Producer** — a program that can emit a supported format. A producer
-  *detects, negotiates, announces, emits*.
-- **Intermediary** — anything between them: shells, `sh -c`, wrappers,
-  other producers. An **unaware** intermediary participates by doing
-  nothing: it inherits and propagates the environment (and any offered
-  descriptor), so the offer tunnels through it. An **attached** intermediary
-  (a producer that itself runs children) is a harness to its children
-  (Section 6).
+Every node in a process tree is treated as a recursive function with a
+strict API boundary:
 
-One process may hold all three roles at once.
+```
+f(parent_id, sink) → ndjson-crap records, written to sink
+```
+
+- **Input** (via environment): the sink address and the node id under
+  which this node's root records nest.
+- **Output**: records on the node's own connection to the sink. A node's
+  descendants are recursive calls; their records flow to the *same* sink
+  on their *own* connections — never through the node.
+
+Roles:
+
+- **Client** — every attached node, without exception. Connects, receives
+  a grant (Section 4), emits records.
+- **Server (the sink)** — never a long-lived service, never a node
+  "becoming" one: it is *birthed* by a root (Section 6), owns one
+  unix-domain socket for one tree, and dies with it.
+- **Root** — a node holding a well-formed offer but no sink address. It
+  births the server, connects as an ordinary client, and exports the sink
+  address to its children.
+- **Unaware intermediary** — any program in between that has never heard
+  of this protocol. It participates by doing nothing: the environment
+  tunnels through it.
 
 A child's output is exhaustively one of two things:
 
-- **Crap** — records in a negotiated format, on the channel, from a child
-  that attached.
+- **Crap** — records on its own connection to the sink, from a child that
+  attached.
 - **Garbage** — everything else: the plain stdout/stderr of a child that
   never attached (canonically, *garbage*), plus whatever an attached child
-  still writes to its captured stdio.
+  still writes to its stdio.
 
-Every node that executes subprocesses MUST handle both: crap by
-re-offering (Section 6) so it lands on the channel already structured, and
+Every node that executes subprocesses MUST handle both: crap by scoping
+(Section 5 — set the child's `CRAP_PARENT` so its records nest), and
 garbage by capturing it and wrapping it as `output` records under the
-child's execution node. The tree is therefore complete either way — an
-attached child appears as nested nodes, an unattached child as a node with
-captured garbage — and a presenter never has to care which kind of child
+child's execution node, sent over the parent's own connection. The tree is
+complete either way, and a presenter never has to care which kind of child
 produced what it renders.
 
 ### 2. The offer
 
-A harness offers by exporting **one REQUIRED variable**:
+A harness offers by exporting **one variable**:
 
-- **`CRAP=<major>`** — the CRAP major version the harness accepts.
-  This document is about CRAP-2, so a conforming harness exports `CRAP=2`.
+- **`CRAP=<major>`** — the CRAP major version the harness accepts. This
+  document is about CRAP-2, so a conforming harness exports `CRAP=2`.
+  This is the entire user-facing surface; the variables below are
+  machinery managed by attached nodes and the client library.
 
-That alone is a complete offer. Four OPTIONAL variables refine it:
+Two further variables are written by the protocol itself:
 
-- **`CRAP_FD=<n>`** — the decimal number of an open, writable file
-  descriptor the producer inherits and writes the stream to.
-  **Default: `1` (stdout).** The default is what makes the zero-setup
-  pipeline work — the harness is whatever is reading the producer's
-  stdout (`CRAP=2 just build | crap-present`). When `CRAP_FD` names a
-  descriptor other than stdout, stdout stays human-oriented and the
-  structured stream is a pure side channel, as with `--events-fd`.
-- **`CRAP_ACCEPT=<tokens>`** — the formats the harness accepts, in
-  preference order, as a comma-separated list of format tokens
-  (Section 4). **Default: `ndjson-crap/1`** — the canonical format for
-  CRAP-2.
-- **`CRAP_PARENT=<id>`** — a non-negative integer: the node id (`tp`) in
-  the harness's stream under which the producer's root records nest.
-  Absent means the producer's roots are top-level (`parent: null`).
-- **`CRAP_DEPTH=<d>`** — a non-negative integer: the `depth` the producer
-  SHOULD assign its root nodes. Defaults to `0`. Advisory — consumers
-  SHOULD derive depth from `parent` lineage and treat `depth` as a hint.
+- **`CRAP_SINK=<path>`** — absolute filesystem path of the sink's
+  unix-domain socket. Exported by the root after birthing; inherited by
+  everything below it.
+- **`CRAP_PARENT=<id>`** — non-negative integer: the node id under which
+  the receiving node's root records nest. Set per-child by attached
+  parents. Absent means the node's roots are top-level (`parent: null`).
 
 An offer is **well-formed** iff `CRAP` parses as an integer major version.
-The presence of a well-formed offer is the detection signal — the moral
-equivalent of go-plugin's magic cookie: it asserts "a CRAP-aware consumer
-is on the other end of your channel", nothing more. It is not a secret and
-conveys no authority (see Security Considerations).
+Its presence is the detection signal; it is not a secret and conveys no
+authority (see Security Considerations). Version negotiation is the
+integer itself plus the per-connection grant (Section 4): an incompatible
+future revision is a different major.
 
-The harness MUST tolerate, on the read side: zero structured bytes before
-EOF (nothing attached — and in the stdout-default case, arbitrary plain
-human output instead), lines that do not parse (decode to `Unknown`, per
-the tolerant reader), and more than one hello (Section 6). When the channel
-is a dedicated descriptor, EOF arrives when the last process holding the
-write side exits.
+### 3. Attachment (the `attach()` contract)
 
-### 3. Detection and degradation (producer)
+The crap framework ships this procedure as a native library function
+(go-crap and rust-crap) and, for other languages, as a C-ABI export or a
+spec-conformant reimplementation — the client side is deliberately small
+enough that the wire description below is a complete implementation guide.
+A node, at startup:
 
-A producer, at startup:
+1. Reads `CRAP`. Absent, malformed, or an unsupported major → the node is
+   **unattached**: it MUST behave exactly as if the protocol did not
+   exist, and MUST NOT modify any `CRAP*` variable for its children.
+2. If `CRAP_SINK` is set: connect to it and perform the grant exchange
+   (Section 4). On *any* failure — missing socket, refused connection,
+   malformed grant, unsupported granted format — the node MUST proceed as
+   if `CRAP_SINK` were absent (step 3). A dead ancestor sink thus causes
+   the subtree to re-root rather than go dark: severability doubles as
+   the failure mode.
+3. If `CRAP_SINK` is not set (or step 2 failed): the node is a root. It
+   MUST birth a server (Section 6), connect to it as a client, and export
+   the new `CRAP_SINK` to its children. A node that cannot birth (e.g.
+   resource failure) degrades to unattached.
+4. After a successful grant, the node emits records (Section 5). A write
+   failure after attachment MUST NOT abort the node's real work; it drops
+   records from that point (mirroring [eng RFC 0002]'s write-failure
+   policy).
 
-1. Reads `CRAP`. If absent, malformed, or naming a major version the
-   producer does not implement, it is **unattached**: it MUST behave
-   exactly as if the protocol did not exist.
-2. Resolves the channel: `CRAP_FD` if set (validated — on Unix,
-   `fcntl(fd, F_GETFL)` succeeds and the access mode is writable),
-   otherwise stdout. A set-but-invalid `CRAP_FD` — e.g. the variables
-   outlived the descriptor through some intermediary — MUST degrade
-   silently to unattached, never error. (Contrast with an *explicit*
-   opt-in flag like `--events-fd`, where a dead descriptor is a usage
-   error; explicit flags keep their own semantics and take precedence
-   over an ambient offer.)
-3. Selects the **first token in `CRAP_ACCEPT` order that it supports**
-   (harness preference wins; the absent-variable default is
-   `ndjson-crap/1`). If it supports none, it is unattached.
-4. **Announces** by writing the hello (Section 5) to the channel, then
-   emits its stream in the chosen format.
+Explicit opt-in flags (e.g. `just --events-fd`) take precedence over an
+ambient offer and keep their own documented semantics, including
+error-on-invalid-descriptor.
 
-Silent degradation is the kitty-derived property: capability detection
-costs the harness one `setenv`, costs an unaware program nothing, and a
-capable program never has to guess.
+Silent degradation at every step is the kitty-derived property: a capable
+node never has to guess, an incapable or unlucky one never breaks the run.
 
-When the channel is a dedicated descriptor, an attached producer SHOULD
-keep stdout/stderr human-oriented (its existing behavior when unobserved).
-When the channel is defaulted stdout, the structured stream *replaces* the
-producer's human stdout — human diagnostics belong on stderr — which is
-precisely the existing `just --events-fd 1 | crap-present` contract made
-ambient.
+### 4. The connection: grant, then records
 
-### 4. Format tokens and negotiation
+Connections are point-to-point and framed by the transport, which is what
+makes writer identity free. The protocol on each connection:
 
-A format token is:
-
-```
-<name>/<major>[;<param>=<value>]*
-```
-
-- `name` — lowercase `[a-z0-9-]+`. `major` — decimal major version of that
-  format. The pair identifies wire compatibility: a consumer offering
-  `ndjson-crap/1` MUST accept any stream valid under [ndjson-crap v1]
-  including its additive evolution.
-- Parameters refine the offer; unknown parameters MUST be ignored. Defined
-  here:
-  - `families=<f>[+<f>]*` (ndjson-crap) — which record families the
-    harness renders (`result`, `execution`, `operation`). Advisory; a
-    producer MAY use it to choose a richer or cheaper emission strategy.
-  - `transport=<t>[+<t>]*` — transports the harness supports
-    (Section 8). Default: `inline`.
-
-Example:
-
-```
-CRAP=2
-CRAP_ACCEPT=crap-pack/1,ndjson-crap/1;families=execution+operation
-```
-
-offers a (hypothetical) binary format preferentially, falling back to
-ndjson-crap. Negotiation is one-shot and declarative: there is no
-counter-offer round trip, because the channel is unidirectional in v1. The
-producer's choice is communicated by the hello.
-
-**Registry.** This RFC defines one format: `ndjson-crap/1`, the canonical
-wire format, which IS shared-channel-capable (Section 7). The name
-`crap-pack` is reserved for a future compact binary encoding of the same
-record model (length-prefixed, presumably CBOR); any new format's
-specification MUST state its name/major, whether it supports shared
-channels, and its mapping to the CRAP record model.
-
-### 5. The hello
-
-The first bytes an attached producer writes to the channel MUST be a single
-JSON object on one line — the **hello** — regardless of the negotiated
-format. The hello is the [ndjson-crap v1] `crap` header record with additive
-fields:
+**Grant (server → client, exactly one line, immediately on accept):**
 
 ```json
-{"type":"crap","version":2,"ndjson":1,"format":"ndjson-crap/1","producer":"just-us/0.4.2","parent":7,"sid":"9f31c2"}
+{"type":"crap","version":2,"base":0,"format":"ndjson-crap/1"}
 ```
 
-- `type` (REQUIRED) — `"crap"`.
-- `version` (REQUIRED) — the CRAP major version attached to (`2`),
-  i.e. the producer's answer to the offer's `CRAP=<major>`.
-- `format` (REQUIRED) — the selected format token, without parameters.
-- `producer` (REQUIRED) — `<name>/<version>` of the emitting program, for
-  diagnostics.
-- `ndjson` (REQUIRED when `format` is `ndjson-crap/1`) — the ndjson-crap
-  schema version, for byte-compatibility with the v1 header.
-- `parent` (OPTIONAL) — echo of `CRAP_PARENT`, so a consumer can correlate
-  a hello with its position in the tree.
-- `sid` (OPTIONAL) — a random per-producer-instance id, distinguishing
-  producers on a shared channel.
-- `transport` (OPTIONAL) — absent or `null` means **inline**: the
-  negotiated stream follows on this channel. Section 8 reserves the
-  non-null form.
+- `version` (REQUIRED) — the CRAP major the server speaks.
+- `base` (REQUIRED) — the id base granted to this connection. The client
+  MUST derive every node id it emits (`tp`, operation `op`) as
+  `base + n`, `n` counting from 1, `n < 2^32`.
+- `format` (REQUIRED) — the format token the server accepts on this
+  connection. This document defines `ndjson-crap/1`. A client that cannot
+  produce the granted format MUST disconnect and degrade per Section 3
+  step 2.
 
-After the hello's terminating `\n`, the channel speaks the announced format.
-For `ndjson-crap/1` that means the hello doubles as the stream's `crap`
-header ("MUST be first when present" is satisfied per producer; see
-Section 7 for multi-producer channels). For a future binary format the
-hello is a self-describing JSON preamble before binary payload — the
-HTTP-Upgrade shape, which is what lets the format set iterate without
-touching detection.
+The server MUST grant bases whose intervals `[base, base + 2^32)` are
+disjoint across the socket's lifetime and lie below 2^53 (JSON-exact
+integers). RECOMMENDED: `base = k·2^32` for the k-th accepted connection,
+counting from 0 — the first connection (normally the root itself) then
+emits plain `1, 2, 3, …`, so a single-producer stream is byte-identical
+to today's, and ids are deterministic given accept order.
 
-The hello serves the same purpose as go-plugin's `CORE-PROTOCOL-VERSION |
-APP-PROTOCOL-VERSION | NETWORK-TYPE | NETWORK-ADDR | PROTOCOL` line: the
-host learns *that* the child attached, *what* it chose, and *where* the data
-flows — except that "where" defaults to "right here".
+**Records (client → server, the rest of the connection):** ndjson-crap,
+one record per line, flushed per record. The client's root nodes carry
+`parent` = its inherited `CRAP_PARENT` (or `null`). A client MAY send an
+[ndjson-crap v1] `crap` header record first (e.g. carrying a `producer`
+string for diagnostics); it needs no special handling — it is a record
+like any other.
 
-A producer whose invocation emits nothing (a `--list`-style subcommand)
-SHOULD defer the hello until its first record, so silent invocations stay
-silent on the channel too.
+The grant subsumes both the first draft's *hello* (the connection itself
+is the announcement; the grant is the acknowledgment) and its
+content-negotiation surface (`CRAP_ACCEPT` token lists): a future format
+arrives by servers granting it, clients understanding it, and `CRAP`
+majoring on incompatibility.
 
-### 6. Recursion: re-offer rules
+### 5. Node duties (client side)
 
-An attached producer that runs children is a harness to them. The received
-offer is **per-edge** — its `CRAP_PARENT` and negotiated format describe the
-parent edge, not the grandchild edge — and its channel may not even be
-reachable by the child under the same name (a producer that captures child
-stdout has repointed the child's fd 1 away from the channel). So:
+An attached node:
 
-> An attached producer MUST NOT propagate its received offer verbatim to
-> its children. For each child it MUST either **re-offer** (below) or
-> **withdraw** (remove `CRAP` and the `CRAP_*` variables from the child's
-> environment).
+- **Scopes its children.** For each child it executes whose output should
+  nest, it MUST set `CRAP_PARENT` to the id of the execution node it
+  allocated for that child (the `node_start` it emitted when launching
+  it). `CRAP` and `CRAP_SINK` are left as inherited. This is the entire
+  re-offer — no descriptors, no narrowing.
+- **Captures garbage.** Per Section 1, an unattached child's stdio is
+  wrapped as `output` records under that child's node, on the parent's
+  own connection. Producers SHOULD keep any single record line under
+  64 KiB (chunking `output` data; consumers concatenate by contract) as
+  buffer hygiene — this is a hygiene bound, not a `PIPE_BUF` atomicity
+  requirement; the server's framing makes interleaving impossible.
+- **Withholds the offer from data-consuming children** (SHOULD): children
+  whose stdout the node consumes *as a value* — command substitution,
+  backtick evaluation, `shell()`-style functions — should run with the
+  `CRAP*` variables removed. With a socket sink the old leak (records in
+  the captured value) cannot happen; this rule is now tree hygiene:
+  evaluation subprocesses are not execution and would clutter the tree
+  with mis-parented nodes. (Demoted from the first draft's MUST
+  accordingly.)
+- **Keeps stdio human.** Records go to the sink; stdout/stderr keep their
+  unobserved behavior. (Producers like just-us that capture child stdio
+  while attached continue to do so — that is the garbage duty, not a
+  contradiction.)
 
-(An *unattached* program makes no such promise — by definition it doesn't
-know the variables exist. That asymmetry is load-bearing: it is what lets
-an offer tunnel through `sh -c`, login shells, and pipelines to reach a
-producer several layers down.)
+Ordering needs no further rules: a node flushes its `node_start` before
+spawning the child, and the child cannot connect before it is spawned, so
+parent-before-child reaches the server in arrival order; everything else
+is demux-by-id, which [ndjson-crap v1] consumers already perform.
 
-One withdraw is REQUIRED rather than optional: a child whose stdout the
-parent consumes **as data** — command substitution, backtick evaluation,
-`shell()`-style functions — MUST have the offer withdrawn by any aware
-parent (attached or not). Stdout is the default channel, so a producer
-attaching there would leak records into the computed value. (The same
-hazard exists under *unaware* intermediaries — `x=$(just build)` in a
-plain shell under an exported `CRAP=2` captures records, exactly as
-`x=$(ls --color=always)` captures escape codes under a forced-color
-environment. Harnesses that export the offer broadly — e.g. session-wide
-rather than around one pipeline — SHOULD set an explicit non-stdout
-`CRAP_FD` to remove the hazard at the source.)
+### 6. The server: birthed, small, self-cleaning
 
-Two re-offer topologies:
+#### 6.1 What it does
 
-**6.1 Passthrough (RECOMMENDED default).** The producer hands the child the
-*same* channel and scopes it into its own node tree, exporting all of:
+The server is deliberately *not* a structurer. It MUST:
 
-- `CRAP` — unchanged.
-- `CRAP_FD` — a descriptor that reaches the producer's channel from the
-  child. Because the producer typically captures the child's stdout (so
-  the child's fd 1 is a capture pipe, not the channel), the producer
-  SHOULD `dup(2)` its channel to a dedicated inheritable descriptor once
-  and name that number here. The descriptor MUST remain inheritable (no
-  `FD_CLOEXEC`).
-- `CRAP_ACCEPT` — narrowed to **exactly the negotiated format**, and only
-  if that format is shared-channel-capable. (A grandchild that cannot
-  speak it simply stays unattached and its plain output is captured as
-  `output` records, as today.)
-- `CRAP_PARENT` — the `tp` of the execution node the producer allocated
-  for this child (the `node_start` it emits when it runs the command).
-- `CRAP_DEPTH` — that node's depth + 1.
+1. Own one listening unix-domain socket (bound by itself, or received
+   pre-bound from its spawner — see 6.2).
+2. On each accept, write the grant (Section 4) with a fresh disjoint
+   base.
+3. Splice complete lines from all connections to its single merged output
+   in arrival order — atomically per line, which is trivial since it is
+   the only writer. It MUST NOT reorder, MUST NOT rewrite, and need not
+   parse record contents. It MUST tolerate lines that are not valid
+   records (forwarding or dropping them; the downstream reader is
+   tolerant) and MUST bound per-connection line buffers (it MUST support
+   lines to at least 64 KiB and MAY drop longer ones with a diagnostic
+   record).
+4. Exit by **lease**: the spawner holds the write end of a pipe the
+   server was born with. On lease EOF the server stops accepting, drains
+   open connections, flushes, unlinks its socket, and exits. The kernel
+   closes descriptors on any process death, so cleanup survives even
+   `SIGKILL` of the spawner. The server owns its socket file: it unlinks
+   it on every exit path.
 
-The grandchild's records then flow on the shared channel, parented under
-the producer's node — nesting falls out of the existing
-`tp`/`parent`/`depth` lineage with no muxing, no re-parsing, and no
-per-edge pipes. The discipline that makes sharing safe is Section 7.
+The merged output goes wherever the spawner pointed the server's stdout at
+birth: a pipe (`CRAP=2 just build | crap-present` — the pipe carries the
+single-writer merged stream), a file (`CRAP=2 just build > log.ndjson`
+records the run), or a presenter (the server MAY itself be the viewport,
+e.g. `crap-present --serve`).
 
-**6.2 Mux.** The producer creates a **fresh pipe per child** and re-offers
-anything it wants on it (any format list, any transport set). It reads the
-child's stream itself and translates: re-allocating node ids into its own
-stream's namespace, rewriting `parent` linkage, transcoding formats if it
-negotiated something different downstream than upstream. Mux is REQUIRED
-when the producer wants to transcode, filter, or rate-limit a child; it is
-the only topology available when the negotiated upstream format is not
-shared-channel-capable.
+This minimalism is what makes the server embeddable: a base counter plus a
+line-splicing multiplexer over `poll`/`accept`/`read`/`write` is a few
+hundred lines, implementable with preallocated buffers and no runtime
+services — small enough to ship inside every node's client library rather
+than as infrastructure.
 
-A harness at the root is just the degenerate case: it "muxes" zero levels
-and renders.
+#### 6.2 How it is born
 
-**6.3 The process tree on the wire.** With passthrough recursion, the tree
+The spawning root SHOULD bind the socket and create the lease pipe
+*before* birthing, passing both as inherited descriptors — then there is
+no readiness race in any embodiment, and the root can spawn children
+immediately. Three conformant embodiments:
+
+- **fork-and-become** — `fork()`; the child calls the embedded serve
+  function on the inherited descriptors and `_exit`s when it returns.
+  Available to single-threaded clients, or to any client whose serve core
+  is fork-safe: after `fork()` in a threaded process only the calling
+  thread survives, so the serve core MUST NOT take locks or allocate from
+  a possibly-locked allocator post-fork — the RECOMMENDED implementation
+  style (static arenas, raw syscalls) satisfies this by construction.
+- **re-exec self** — spawn the node's own executable (`/proc/self/exe` on
+  Linux, platform equivalents elsewhere) with a marker variable; the
+  client library's init hook recognizes the marker and routes into the
+  embedded serve function before application logic runs. REQUIRED style
+  for runtimes where fork-without-exec is unsupported (Go). No external
+  binary, clean address space.
+- **external binary** — exec a shipped server (`crap-present --serve`).
+  OPTIONAL convenience; never a hard dependency of the protocol.
+
+All three implement the same server contract (grant, splice, lease), so
+mixed trees interop. Sockets MUST be filesystem sockets (not Linux
+abstract-namespace ones) in a directory with `0700` permissions —
+`$XDG_RUNTIME_DIR/crap/` RECOMMENDED, `$TMPDIR` fallback — so connection
+rights follow file permissions.
+
+### 7. The invariants, demonstrated
+
+**Composable.** The tree
 
 ```
-spinclass merge            (harness: CRAP=2, viewport on the read side)
-└── just …                 (attached: hello, node per recipe)
-    └── recipe `test`      (node_start tp=K)
-        └── :: go-test …   (attached via re-offer: CRAP_PARENT=K)
-            └── package P  (test record, parent K lineage)
+spinclass merge            (harness: exports CRAP=2, reads merged stream)
+└── just …                 (root: births server, exports CRAP_SINK;
+    │                       client: nodes per recipe)
+    └── recipe `test`      (node_start tp=K; just sets CRAP_PARENT=K
+        │                   for the child)
+        └── sh -c …        (unaware: env tunnels through)
+            └── :: go-test (client: connects itself, granted base
+                            2^32·k, roots carry parent:K)
 ```
 
-is one stream whose `parent` links reproduce the process tree, and the
-viewport's check marks nest accordingly. This is the protocol's reason to
-exist.
+is one merged stream whose `parent` links reproduce the process tree;
+check marks nest accordingly. Two aware tools launched *in parallel* by an
+unaware script inherit identical context — neither can deterministically
+pick a distinct index, and no handed-down path can fix that (a
+coordination-free pigeonhole) — but each gets its own connection, hence
+its own granted base: uniqueness comes from connection identity, lineage
+from the shared `CRAP_PARENT`, and the only nondeterminism is which
+sibling gets which base (accept order). That irreducible residue is a
+label, not a structure.
 
-### 7. Shared-channel discipline
+**Severable.** Severing is **root-election**: run any subtree without an
+inherited `CRAP_SINK` — a debugging shell, a CI job, a cron entry — and it
+births its own server, yielding a complete stream that any crap-compliant
+presenter renders. A node whose ancestor sink died re-roots automatically
+(Section 3 step 2). The deliberate trade: a *running* tree's interior
+edges carry nothing (records flow point-to-point), so severability is
+"cut and re-run/re-root", not "wiretap a live edge".
 
-A producer attached via an **ambient** offer cannot assume it is the
-channel's only writer: a passthrough ancestor, or parallel siblings under
-an unaware intermediary, may share the channel. Therefore an
-ambient-attached producer:
+### 8. Relationship to existing opt-in flags
 
-- **MUST randomize its node-id base.** Node ids (`tp`, and the `op` ids of
-  the operation family) MUST be drawn from `base + n` where `base` is a
-  uniformly random integer in `[2^40, 2^48)` chosen per process, and `n`
-  increments from 1. This keeps ids inside JSON's exact-integer range
-  (< 2^53), makes cross-producer collision negligible without
-  coordination, and never collides with an explicit-flag producer's small
-  monotonic ids. ([ndjson-crap v1] requires only stream-uniqueness of
-  `tp`; monotonic-from-1 is an [eng RFC 0002] detail that applies to the
-  explicit `--events-fd` contract, not here.)
-- **MUST write each record with a single `write(2)` of at most `PIPE_BUF`
-  (4096) bytes** so concurrent records never interleave mid-line. Bulky
-  payloads — in practice `output` `data` — MUST be chunked across multiple
-  records (consumers already concatenate `output` data by contract).
-  Producers SHOULD bound the pre-escaping chunk size such that the
-  serialized line cannot exceed the limit (1024 bytes of UTF-8 text is a
-  safe choice).
-- **MUST scope every record to its lineage.** Root execution/operation
-  records carry `parent` = `CRAP_PARENT`. Records that are global in a
-  single-producer stream — `plan`, `summary`, and result-family records,
-  which have no lineage fields in v1 — MUST either carry the additive
-  OPTIONAL `parent` field this RFC introduces on `plan` / `test` /
-  `bailout` / `summary` (lineage for result streams nested under an
-  execution node), or be omitted. A v1 presenter ignores the additive
-  field and renders such records flat — acceptable degradation; a
-  conforming presenter nests them.
-- MAY include a `sid` in its hello so consumers can attribute hellos.
-
-Multiple hellos on one channel are therefore legal and expected under
-passthrough: each attached producer announces once, before any of its own
-records. Consumers MUST treat a hello as per-producer, not per-stream. (For
-`ndjson-crap/1` this is compatible: extra `crap` records mid-stream decode
-as headers and are ignorable.)
-
-A producer attached via an **explicit flag** (e.g. `--events-fd`) owns its
-channel by contract and is exempt from the random-base and chunking rules
-on that channel — but the moment it re-offers passthrough, its *children*
-are ambient and the discipline applies to them.
-
-### 8. Transports (reserved)
-
-v1 defines and requires exactly one transport, **`inline`**: the negotiated
-stream flows on the offered channel itself, after the hello. This is the
-whole prototype surface — an offer that is one environment variable, per
-the design constraint that the simplest deployment must stay trivial.
-
-The go-plugin rendezvous shape is reserved for formats or consumers that
-need a private, bidirectional, or higher-throughput channel: a harness MAY
-offer `transport=inline+unix`; a producer MAY then announce
-
-```json
-{"type":"crap","version":2,"format":"crap-pack/1","producer":"…","transport":{"scheme":"unix","addr":"/run/user/1000/crap-9f31c2.sock"}}
-```
-
-meaning: the producer listens at `addr`, the harness connects, and the
-negotiated stream flows over the connection while the offered channel
-carries only hellos. A producer MUST NOT announce a transport the offer did
-not include. Defining the rendezvous lifecycle (listening, timeouts,
-cleanup) is left to the RFC that first needs it; this RFC only shapes the
-negotiation so that adding it later is additive. Out-of-band transports
-also dissolve the shared-channel constraints of Section 7 per-connection,
-which is the expected migration path if chunked-inline throughput ever
-becomes the bottleneck.
-
-### 9. Relationship to existing opt-in flags
-
-`just --events-fd N` / `JUST_EVENTS_FD` ([eng RFC 0002]) and similar
-explicit flags remain fully specified and unchanged: explicit flags take
-precedence over an ambient offer, keep their error-on-invalid-fd semantics,
-and their streams keep their documented shape (plan-first, monotonic
-`tp`s). The attach protocol is the ambient generalization: detection
-without per-invocation wiring, plus the recursive and negotiated parts that
-a single flag cannot express.
-
-### 10. Library and CLI affordances (informative)
-
-- **`go-crap/attach`** (future work): `attach.Detect()` returning a
-  negotiated `io.Writer` + metadata (format, parent, depth) or nil;
-  `attach.Offer(cmd *exec.Cmd, opts)` for harnesses; integration with
-  `crap.Reporter` so `NewReporter(attach.Writer(), …)` is the whole
-  producer story, including automatic re-offer env for `Phase`-scoped
-  children.
-- **`:: attach -- <cmd…>`** (future work): the pipeline adapter. Runs a
-  command under a fresh offer, splices the channel to stdout, and — when
-  the child never attaches — degrades to today's `:: exec` conversion
-  (node + captured output). Makes `:: attach -- just build | crap-present`
-  the universal form of "give me structure if you have it".
-- **`crap-present`** (future work): grow a wrapper mode that execs its
-  argv with `CRAP=2` exported and renders the pipe — making
-  `crap-present -- just build` self-offering, no shell export needed.
+`just --events-fd N` / `JUST_EVENTS_FD` ([eng RFC 0002]) is unchanged:
+plan-first, monotonic tps, error on invalid descriptor, stream shape
+byte-identical. The attach protocol is the ambient generalization. A
+producer supporting both MUST prefer the explicit flag when given.
 
 ## Security Considerations
 
-- **The offer conveys no authority and no authenticity.** Any parent can
-  set `CRAP`; attaching reveals to that parent exactly the telemetry the
-  protocol is designed to reveal. This is the same trust relationship as
-  stdout/stderr — a parent that can run you can already read your output.
-  Producers MUST NOT treat attachment as a sign of a *trusted* consumer,
-  and the [eng RFC 0002] warning carries over: quiet suppresses echo, not
-  capture; command text and child output reach the channel regardless of
-  quiet settings, so secrets that must not leave the process must not be
-  written at all.
-- **Descriptor trust.** As with `--events-fd`, the producer writes to the
-  channel it is handed and cannot verify the destination. Validation
-  establishes only "open and writable".
-- **Spoofed or hostile producers.** A harness's read side is attacker-input
-  by construction (any descendant can write). Consumers MUST parse with the
-  tolerant reader, MUST bound memory (per-line caps, capped tails), MUST
-  NOT interpret record text as terminal control sequences, and SHOULD
-  strip/escape ANSI and control bytes before display — unchanged from
-  [ndjson-crap v1] and crap RFC 0001, but the ambient offer widens who can
-  write, so it bears repeating.
-- **Id squatting on shared channels.** A malicious sibling could
-  deliberately collide node ids or claim a foreign `parent`. The
-  consequence is garbled *display*, not privilege; harnesses that need
-  attribution should mux (private pipe per child) instead of passthrough.
+- **The offer conveys no authority.** Any parent can export `CRAP=2`;
+  attaching reveals exactly the telemetry the protocol is designed to
+  reveal, to whoever can read the sink's output — the same trust
+  relationship as stdout. The [eng RFC 0002] warning carries over: quiet
+  suppresses echo, not capture; secrets that must not leave the process
+  must not be written at all.
+- **Socket trust.** Anyone who can connect can inject records; anyone who
+  can read the socket path's directory can find it. The `0700`-directory
+  requirement (Section 6.2) scopes both to the same user, which is the
+  same boundary the user's processes already share. Servers MUST NOT
+  grant to, and SHOULD NOT accept from, peers they cannot restrict by
+  filesystem permission; abstract-namespace sockets are excluded for
+  exactly this reason.
+- **Hostile or buggy clients.** The server's inputs are attacker-grade by
+  construction. It MUST bound per-connection buffers and connection
+  counts; the splice design means a malicious client can at worst pollute
+  the stream with records, which downstream tolerant readers and the
+  display-safety rules of [ndjson-crap v1] (no terminal control
+  interpretation, ANSI stripping) already contain. Id squatting (emitting
+  ids outside the granted base) garbles display, not privilege; a server
+  MAY police ranges but is not required to parse.
+- **No orphan daemons.** The lease (Section 6.1) ties every server's
+  lifetime to its spawner's; there is no registry, no pidfile, and
+  nothing to leak but a socket file the server unlinks on exit.
 
 ## Conformance Testing
 
-The prototype implementation is **just-us** (the `--events-fd` producer
-grows ambient attach, the hello, random tp bases, output chunking, and
-passthrough re-offer; see just-us `docs/features/0002-crap-attach.md`).
-Conformance lives there as unit tests plus bats once the suite grows
-attach coverage (`zz-tests_bats/`, tag `crap_attach`); the table below is
-the requirement map. bats/nix were unavailable in the authoring container,
-so the bats lane is specified but not yet written. The prototype was
-verified end to end against the canonical consumers: a nested
-two-justfile run under `CRAP=2` piped into `crap-present` renders one
-verdict per node, and the stream passes `:: validate`.
+The prototype lives in **just-us**. The first-draft prototype (pushed on
+this branch) validated the protocol *semantics* end to end over the
+superseded fd transport: ambient `CRAP=2` detection with silent
+degradation, hello-then-records, lineage nesting across a two-justfile
+tree, garbage capture, backtick withdrawal, explicit-flag precedence, and
+acceptance by the canonical consumers (`crap-present` rendering,
+`:: validate` 16/16 records). Reworking it to this draft — `attach()`
+connect-or-birth, the granted-base client, and an embedded re-exec/fork
+server (plus `crap-present --serve` and the `go-crap`/`rust-crap` attach
+libraries on the crap side) — is the tracked next step; the requirement
+map below is written against this draft.
 
 | Requirement | Test | Description |
 | --- | --- | --- |
-| §2/§3 `CRAP=2` alone attaches to stdout | unit + smoke | `CRAP=2` ⇒ active sink on fd 1, hello first |
-| §3 malformed/unsupported offer degrades silently | unit | `CRAP=banana`, `CRAP=3`, invalid `CRAP_FD` ⇒ unattached, behavior unchanged |
-| §3 explicit flag precedence | bats | `--events-fd` + ambient offer ⇒ RFC 0002 stream shape on the flag's fd |
-| §4 first-supported-token selection | unit: `negotiate` | `crap-pack/1,ndjson-crap/1;families=…` ⇒ picks `ndjson-crap/1`; unknown-only list ⇒ unattached |
-| §5 hello shape and position | unit | `crap` record with `version`/`ndjson`/`format`/`producer`/`parent` precedes all records |
-| §6.1 passthrough re-offer | bats | nested `just` sees `CRAP` unchanged, `CRAP_FD` = dup'd channel, `CRAP_ACCEPT` narrowed, `CRAP_PARENT` = recipe `tp` |
-| §7 random tp base | unit | ambient `tp`s ≥ 2^40; explicit-flag `tp`s remain 1..n |
-| §7 single-write ≤ PIPE_BUF, output chunking | unit | large child output splits across `output` records, each serialized line ≤ 4096 bytes |
-| §7 nested global-record scoping | unit | producer attached with `CRAP_PARENT` omits `plan` (or scopes it) |
+| §3 `CRAP=2` alone roots and serves | bats | `CRAP=2 just build > f` yields one merged stream; first connection's ids are `1..n` |
+| §3 degradation | unit | `CRAP` absent / `CRAP=3` / birth failure ⇒ behavior unchanged |
+| §3 dead sink re-roots | bats | stale `CRAP_SINK` ⇒ subtree births its own server, stream complete |
+| §4 grant shape and base discipline | unit | grant precedes records; bases disjoint; client ids = base+n |
+| §5 child scoping | bats | nested `just` records carry `parent` = outer recipe id via its own connection |
+| §5 garbage capture | bats | unattached child stdio arrives as `output` records under its node |
+| §6.1 splice atomicity and arrival order | unit | concurrent clients' lines never interleave mid-line; parent `node_start` precedes child records |
+| §6.1 lease cleanup | unit | spawner exit (incl. SIGKILL) ⇒ server drains, unlinks socket, exits |
+| §7 unaware-parallel composition | bats | two aware tools under an unaware script get distinct bases, same parent |
 
 ## Compatibility
 
-- **Additive to [ndjson-crap v1]** — the `ndjson` version stays `1`. The
-  hello reuses the existing `crap` header record with new OPTIONAL fields
-  (`format`, `producer`, `parent`, `sid`, `transport`); the OPTIONAL
-  `parent` on result-family records is a new field on existing records,
-  permitted by v1's forward-compatibility rules. v1 consumers render
-  attached streams flat but correctly.
-- **[eng RFC 0002] unchanged.** The explicit `--events-fd` contract (plan
-  first, monotonic tps, error on invalid fd) is untouched; ambient attach
-  is a parallel activation path with its own rules. New records appearing
-  on an `--events-fd` stream via passthrough grandchildren are covered by
-  RFC 0002's "consumers MUST ignore unknown record types".
-- **crap RFC 0001 composes.** Operation-family records from an attached
-  producer scope via the same `parent` lineage; nothing in the operation
-  family changes.
-- **Viewport.** No new `Model` message is required for v1 rendering
-  (flat-with-lineage is already the execution family's shape). Rendering
-  parent-scoped *result-family* records as nested check marks is presenter
-  work tracked alongside the schema amendment.
+- **Additive to [ndjson-crap v1]**; the `ndjson` version stays `1`. The
+  grant line exists only on the server→client leg of connections — it
+  never appears in the merged stream, so consumers need nothing new. Two
+  additive amendments stand: the OPTIONAL `parent` field on result-family
+  records (`plan`/`test`/`bailout`/`summary`) so attached result-stream
+  producers can nest under an execution node, and the observation that
+  [ndjson-crap v1] requires only stream-uniqueness of ids (granted bases
+  satisfy it; monotonic-from-1 is an [eng RFC 0002] detail of the
+  explicit flag).
+- **[eng RFC 0002] unchanged** (Section 8). Records from other clients
+  appearing alongside a producer's own in the merged stream are covered
+  by its consumers-ignore-unknown rule and by demux-by-id.
+- **First draft of this RFC**: superseded. `CRAP_FD`, `CRAP_ACCEPT`,
+  `CRAP_DEPTH`, the hello header fields, the `sid`, the format-token
+  grammar, the transport rendezvous, and the shared-channel discipline
+  (random bases, `PIPE_BUF` single-writes, mandatory chunking) are all
+  withdrawn; `CRAP` and `CRAP_PARENT` retain their meaning, and
+  `CRAP_SINK` replaces `CRAP_FD`. The just-us fd prototype implements the
+  withdrawn transport and is marked superseded in its FDR.
+- **Viewport.** No new `Model` message; flat-with-lineage already renders
+  (validated). Nested *indentation* for parent-scoped records remains
+  presenter work tracked alongside the result-family amendment.
 - **The `CRAP` name.** No known tool reads a bare `CRAP` environment
-  variable; the `CRAP_*` namespace is claimed by this RFC.
+  variable; the `CRAP*` namespace is claimed by this RFC.
 
 ## References
 
 ### Normative
 
 - [RFC 2119] — Key words for use in RFCs to Indicate Requirement Levels.
-- [ndjson-crap v1] — `docs/ndjson-crap-schema.md`, the wire format this
-  protocol negotiates and amends.
+- [ndjson-crap v1] — `docs/ndjson-crap-schema.md`, the wire format whose
+  records flow over this protocol.
 - [eng RFC 0002] — just-us `--events-fd` stream, the explicit-activation
   precursor whose execution family carries the tree.
 
 ### Informative
 
-- [kitty-graphics] — the kitty graphics protocol: capability detection
-  with silent degradation by unaware participants, the design stance this
-  protocol borrows. <https://sw.kovidgoyal.net/kitty/graphics-protocol/>
-- [go-plugin] — HashiCorp's plugin handshake: magic-cookie env detection,
-  host-advertised protocol versions, one-line announce naming the chosen
-  protocol and transport rendezvous.
+- [kitty-graphics] — capability detection with silent degradation by
+  unaware participants, the design stance this protocol borrows.
+  <https://sw.kovidgoyal.net/kitty/graphics-protocol/>
+- [go-plugin] — HashiCorp's plugin handshake; its host-advertised
+  versions and transport rendezvous informed the first draft and were
+  dissolved by the birthed-server model (Design History).
   <https://github.com/hashicorp/go-plugin/blob/main/docs/internals.md>
-- crap RFC 0001 — operation family + producer reporter API.
-- just-us FDR 0002 — `docs/features/0002-crap-attach.md`, the prototype's
-  design record and divergences.
+- crap RFC 0001 — operation family + producer reporter API; operation
+  ids participate in granted bases like `tp`s.
+- just-us FDR 0002 — `docs/features/0002-crap-attach.md`, the
+  first-draft prototype's design record.
 
 [RFC 2119]: https://www.rfc-editor.org/rfc/rfc2119
 [ndjson-crap v1]: ../ndjson-crap-schema.md

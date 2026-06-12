@@ -39,7 +39,9 @@ disjoint deterministic id base, splices record lines to one merged output
 in arrival order, and cleans itself up when its birth lease drops.
 Attachment is scoped to the process tree: the server admits only peers
 descended from its spawner, and everything outside — leaked offers,
-detached daemons — is denied and reverts to dumb output. Children
+detached daemons — is denied and reverts to dumb output. Roots
+presenting to a terminal share one tty-keyed server, elected by atomic
+bind, so each terminal has zero or one server — never more. Children
 that never attach emit **garbage** — plain stdio — which their parent
 captures and wraps as `output` records, so the tree is complete either way.
 No randomness, no shared-descriptor write discipline, no per-hop pumping
@@ -189,10 +191,22 @@ A node, at startup:
      means this node is not part of that tree (Section 4, scoped
      attachment); it must not respond by birthing a surprise server of
      its own.
-3. If `CRAP_SINK` is not set (or step 2 failed): the node is a root. It
-   MUST birth a server (Section 6), connect to it as a client, and export
-   the new `CRAP_SINK` to its children. A node that cannot birth (e.g.
-   resource failure) degrades to unattached.
+3. If `CRAP_SINK` is not set (or step 2 failed with "no server there"):
+   the node is root-capable. Where it lands depends on where its output
+   goes:
+   - **Presenting to a terminal** (stdout is a tty): the node MUST use
+     the terminal's shared server (Section 6.3) — connecting to the
+     tty-keyed socket if one is live, electing itself by atomic bind if
+     not — and export the resulting `CRAP_SINK` to its children. Two
+     root-capable nodes racing rooflessly on one terminal thus converge
+     on one server, as sibling top-level trees.
+   - **Otherwise** (stdout is a pipe, file, or other destination): the
+     node is a root in the Section 6 sense. It MUST birth a private tree
+     server, connect to it as a client, and export the new `CRAP_SINK`
+     to its children.
+
+   A node that can do neither (resource failure, lost election *and*
+   failed connect) degrades to unattached.
 4. After a successful grant, the node emits records (Section 5). A write
    failure after attachment MUST NOT abort the node's real work; it drops
    records from that point (mirroring [eng RFC 0002]'s write-failure
@@ -348,14 +362,15 @@ The server is deliberately *not* a structurer. It MUST:
    tolerant) and MUST bound per-connection line buffers (it MUST support
    lines to at least 64 KiB and MAY drop longer ones with a diagnostic
    record).
-4. Exit by **lease**: the spawner holds the write end of a pipe the
-   server was born with. On lease EOF the server stops accepting, drains
-   open connections, flushes, unlinks its socket, and exits. The kernel
-   closes descriptors on any process death, so cleanup survives even
-   `SIGKILL` of the spawner. The server owns its socket file: it unlinks
-   it on every exit path. Draining SHOULD be bounded by a grace timeout
-   so a stray connection held by a process that outlived the tree delays
-   exit, not prevents it.
+4. Exit by **lease** (tree servers): the spawner holds the write end of
+   a pipe the server was born with. On lease EOF the server stops
+   accepting, drains open connections, flushes, unlinks its socket, and
+   exits. The kernel closes descriptors on any process death, so cleanup
+   survives even `SIGKILL` of the spawner. The server owns its socket
+   file: it unlinks it on every exit path. Draining SHOULD be bounded by
+   a grace timeout so a stray connection held by a process that outlived
+   the tree delays exit, not prevents it. (Terminal servers substitute a
+   reference-counted lifetime — Section 6.3.)
 
 The merged output goes wherever the spawner pointed the server's stdout at
 birth: a pipe (`CRAP=2 just build | crap-present` — the pipe carries the
@@ -398,6 +413,62 @@ abstract-namespace ones) in a directory with `0700` permissions —
 `$XDG_RUNTIME_DIR/crap/` RECOMMENDED, `$TMPDIR` fallback — so connection
 rights follow file permissions.
 
+#### 6.3 Terminal servers and leader election
+
+**Property: each terminal has zero or one server — never more.** The
+terminal is a shared presentation surface; two servers merging two
+streams onto one tty is the multi-writer collision reappearing at the
+top of the stack, and is forbidden.
+
+The property is enforced by making the terminal itself the rendezvous.
+A terminal server's socket path is **derived deterministically from the
+tty** — RECOMMENDED `<runtime dir>/crap/tty-<major>.<minor>.sock` from
+the controlling terminal's device number — and election is the atomic
+bind:
+
+1. A root-capable node presenting to a tty first tries to **connect** to
+   the tty-keyed path. Success + grant ⇒ a server already exists; the
+   node is a client like any other.
+2. Otherwise it tries to **bind** the path. Success ⇒ it won the
+   election: it births the terminal server on the pre-bound descriptor.
+   `EADDRINUSE` ⇒ it lost a race it didn't see; go to 1 (bounded
+   retries).
+3. A path that refuses connections *and* refuses binds is stale debris
+   from a crashed server: claim it under a sidecar lock file (`flock`),
+   re-verify deadness, unlink, and bind. Implementations MUST ensure
+   mutual exclusion here; the invariant is worth a lock file.
+
+No messages are exchanged to elect — the kernel's bind atomicity *is*
+the election. Losers become clients; their roots (no `CRAP_PARENT`)
+render as sibling top-level trees, which is the correct presentation for
+parallel commands sharing a terminal.
+
+Terminal servers differ from tree servers in three ways:
+
+- **Admission**: the scope check is the terminal, not descent — admit
+  peers whose controlling terminal is the server's tty (peer pid via
+  credentials, then the platform's ctty lookup), deny others. The tty is
+  the tree's roof.
+- **Lifetime**: reference-counted, not leased — the server exits (and
+  unlinks) when its last client disconnects, after a short grace period
+  for back-to-back commands. It serves the terminal, not one spawner.
+- **Output**: its merged stream lands on a human's tty, so it SHOULD
+  present rather than splice raw records — the viewport when available
+  (`crap-present` as the output stage or the server embodiment itself),
+  a plain verdict-per-line renderer as fallback. Raw splice to a tty is
+  permitted only as a last resort. This is the one server flavor where
+  the embedded-tiny embodiment is *not* the natural fit; terminal
+  presentation legitimately wants the shipped presenter, which the
+  ecosystem provides anyway.
+
+Pipes and files need no election: distinct destinations are distinct by
+construction, and one destination is written by one tree server. (A
+future revision MAY generalize the rendezvous key from "tty device" to
+"output destination identity" — e.g. `st_dev:st_ino` of a shared pipe —
+if parallel roofless roots writing one non-tty destination prove to
+matter; for now that case is documented residue, and redirecting to
+distinct files is the workaround.)
+
 ### 7. The invariants, demonstrated
 
 **Composable.** The tree
@@ -438,13 +509,22 @@ edges carry nothing (records flow point-to-point), so severability is
 "cut and re-run/re-root", not "wiretap a live edge".
 
 **Scoped.** The two invariants are bounded by a third property: the
-process tree is the unit of attachment. A node attaches to a given sink
-iff the sink's spawner is its ancestor at attach time (Section 4);
-everything outside that tree — leaked environments in other terminals,
-daemons that detached mid-run, processes sourcing a stale env snapshot —
-reverts to dumb output, or root-elects a tree of its own. Composition
-never crosses tree boundaries by accident, and severed pieces cannot
-half-rejoin a tree they no longer belong to.
+unit of attachment is the process tree, roofed at worst by the terminal.
+A tree server admits descendants of its spawner; a terminal server
+admits holders of its tty (Section 6.3); everything outside — leaked
+environments in other terminals, daemons that detached mid-run,
+processes sourcing a stale env snapshot — is denied and reverts to dumb
+output, or root-elects a tree of its own. Composition never crosses
+scope boundaries by accident, and severed pieces cannot half-rejoin a
+tree they no longer belong to.
+
+**One server per terminal.** Roofless parallelism is the residual
+collision case — two root-capable nodes under an unaware launcher would
+otherwise birth two servers granting overlapping bases onto one shared
+destination. For terminals, Section 6.3 closes it: the tty-keyed
+rendezvous and bind-atomicity election guarantee zero or one server per
+terminal, with losers joining as clients and rendering as sibling
+top-level trees in one viewport.
 
 ### 8. Relationship to existing opt-in flags
 
@@ -509,6 +589,9 @@ map below is written against this draft.
 | §3/§4 denial means dumb output | unit | deny grant / EOF-before-grant ⇒ unattached, no surprise server |
 | §4 grant shape and base discipline | unit | grant precedes records; bases disjoint; client ids = base+n |
 | §6.1 scope check at accept | unit | non-descendant peer gets `deny:"scope"`; in-tree peer whose parent later exits keeps its connection |
+| §6.3 terminal singleton | bats | two roofless root-capable nodes on one pty ⇒ exactly one server, both render as sibling top-level trees |
+| §6.3 cross-terminal denial | unit | a peer on another tty gets `deny:"scope"` from a terminal server |
+| §6.3 stale-path claim | unit | crashed terminal server's socket is reclaimed under the lock; never two binders |
 | §5 connect-before-spawn | unit | no child env export / spawn before the grant is read; serial runs grant identical bases run-to-run |
 | §5 child scoping | bats | nested `just` records carry `parent` = outer recipe id via its own connection |
 | §5 garbage capture | bats | unattached child stdio arrives as `output` records under its node |

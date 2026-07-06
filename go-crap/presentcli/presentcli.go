@@ -13,14 +13,15 @@ import (
 )
 
 // Usage is the one-line help text shared by both entry points.
-const Usage = "present [--title <s>] [--tail <n>]   Read ndjson-crap on stdin and render via the viewport"
+const Usage = "present [--title <s>] [--tail <n>] [--backlog <n>]   Read ndjson-crap on stdin and render via the viewport"
 
 // Run parses args, reads ndjson-crap from in, and renders to ttyOut (the
 // terminal, conventionally stderr). It returns a process exit code.
 func Run(args []string, in io.Reader, ttyOut *os.File) int {
 	var (
-		title string
-		tail  int
+		title   string
+		tail    int
+		backlog int
 	)
 	for i := 0; i < len(args); i++ {
 		switch a := args[i]; a {
@@ -36,6 +37,13 @@ func Run(args []string, in io.Reader, ttyOut *os.File) int {
 					tail = n
 				}
 			}
+		case "--backlog":
+			if i+1 < len(args) {
+				i++
+				if n, err := parseInt(args[i]); err == nil {
+					backlog = n
+				}
+			}
 		case "-h", "--help":
 			fmt.Fprintf(os.Stderr, "Usage: %s\n", Usage)
 			return 0
@@ -46,10 +54,11 @@ func Run(args []string, in io.Reader, ttyOut *os.File) int {
 	}
 
 	err := viewport.Present(in, viewport.Options{
-		Title:     title,
-		TailLines: tail,
-		Out:       ttyOut,
-		IsTTY:     isTerminal(ttyOut),
+		Title:          title,
+		TailLines:      tail,
+		FailureBacklog: backlog,
+		Out:            ttyOut,
+		IsTTY:          isTerminal(ttyOut),
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "present: %v\n", err)

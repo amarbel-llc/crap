@@ -125,7 +125,7 @@ func (d *Driver) feed(rec ndjsoncrap.Record) {
 	case ndjsoncrap.Test:
 		d.testsSeen++
 		if r.Output != nil && *r.Output != "" {
-			for _, line := range splitLines(*r.Output) {
+			for _, line := range unnestOutput(*r.Output) {
 				d.s.Send(LogLine{Text: line})
 			}
 		}
@@ -158,7 +158,7 @@ func (d *Driver) feed(rec ndjsoncrap.Record) {
 		d.s.Send(LogLine{Text: "$ " + r.Command})
 
 	case ndjsoncrap.Output:
-		for _, line := range splitLines(decodeOutput(r)) {
+		for _, line := range unnestOutput(decodeOutput(r)) {
 			d.s.Send(LogLine{Text: line})
 		}
 

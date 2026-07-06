@@ -16,6 +16,9 @@ type Options struct {
 	Title string
 	// TailLines overrides the rolling-tail height (0 = default).
 	TailLines int
+	// FailureBacklog overrides the per-phase failure-backlog cap — the lines
+	// persisted above a ✗ verdict (0 = default). crap#35.
+	FailureBacklog int
 	// Out is where the live TUI renders. Defaults to nil, which Present's
 	// caller should set to os.Stderr; tests pass a buffer.
 	Out io.Writer
@@ -42,6 +45,9 @@ func Present(in io.Reader, opts Options) error {
 	}
 	if opts.TailLines > 0 {
 		mopts = append(mopts, WithTailLines(opts.TailLines))
+	}
+	if opts.FailureBacklog > 0 {
+		mopts = append(mopts, WithFailureBacklog(opts.FailureBacklog))
 	}
 
 	p := tea.NewProgram(
@@ -145,7 +151,7 @@ func plainVerdict(out io.Writer, desc string, v VerdictView, output *string) {
 		fmt.Fprintf(out, "✓ %s\n", desc)
 	default:
 		if output != nil {
-			for _, line := range splitLines(*output) {
+			for _, line := range unnestOutput(*output) {
 				fmt.Fprintf(out, "│ %s\n", line)
 			}
 		}

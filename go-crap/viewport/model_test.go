@@ -1,6 +1,7 @@
 package viewport
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -74,6 +75,60 @@ func TestModel_RenderPhaseEndVariants(t *testing.T) {
 	fail := m.renderPhaseEnd(PhaseEnded{Description: "bad", Verdict: VerdictView{Diagnostic: map[string]any{"message": "nope"}}})
 	if !strings.Contains(fail, "│ boom") || !strings.Contains(fail, "✗ bad") || !strings.Contains(fail, "message: nope") {
 		t.Fatalf("fail verdict render: %q", fail)
+	}
+}
+
+// A failure whose reason scrolled past the small live-tail window must still
+// persist above the ✗ verdict: the backlog holds deeper history than the tail
+// (crap#35).
+func TestModel_FailureBacklogPersistsBeyondTailWindow(t *testing.T) {
+	m := New(WithTailLines(2)) // tiny window, default (deep) backlog
+	for _, s := range []string{"step 1", "the failing assertion", "epilogue a", "epilogue b"} {
+		m = updateModel(t, m, LogLine{Text: s})
+	}
+	if len(m.tail) != 2 { // the live window only kept the last two
+		t.Fatalf("tail window should hold 2 lines, got %v", m.tail)
+	}
+	fail := m.renderPhaseEnd(PhaseEnded{
+		Description: "gate",
+		Verdict:     VerdictView{Diagnostic: map[string]any{"exit_code": 1}},
+	})
+	// The scrolled-out reason AND the head of the phase must survive.
+	if !strings.Contains(fail, "the failing assertion") {
+		t.Fatalf("failure dropped the scrolled-out reason:\n%s", fail)
+	}
+	if !strings.Contains(fail, "step 1") {
+		t.Fatalf("failure backlog should persist the whole phase history:\n%s", fail)
+	}
+	if !strings.Contains(fail, "✗ gate") {
+		t.Fatalf("failure verdict line missing:\n%s", fail)
+	}
+}
+
+// The backlog is memory-capped: it retains only the last backlogMax lines.
+func TestModel_FailureBacklogCaps(t *testing.T) {
+	m := New(WithFailureBacklog(3))
+	for i := 0; i < 10; i++ {
+		m = updateModel(t, m, LogLine{Text: fmt.Sprintf("l%d", i)})
+	}
+	if len(m.backlog) != 3 || m.backlog[0] != "l7" || m.backlog[2] != "l9" {
+		t.Fatalf("backlog should keep only the last 3 lines, got %v", m.backlog)
+	}
+}
+
+// A phase boundary and a successful operation both clear the backlog so a
+// later failure never persists a prior phase's history.
+func TestModel_BacklogClearedOnResetAndSuccess(t *testing.T) {
+	m := New()
+	m = updateModel(t, m, LogLine{Text: "old"})
+	m = updateModel(t, m, PhaseStarted{Description: "p"})
+	if len(m.backlog) != 0 {
+		t.Fatalf("PhaseStarted should clear the backlog, got %v", m.backlog)
+	}
+	m = updateModel(t, m, LogLine{Text: "new"})
+	m = updateModel(t, m, OperationDone{})
+	if len(m.backlog) != 0 {
+		t.Fatalf("successful OperationDone should clear the backlog, got %v", m.backlog)
 	}
 }
 

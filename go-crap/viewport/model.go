@@ -11,17 +11,26 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-const defaultTailLines = 5
+const (
+	defaultTailLines = 5
+	// defaultBacklogLines bounds the per-phase failure backlog: the lines
+	// persisted above a ✗ verdict (crap#35). Far deeper than the live tail so
+	// a failure whose reason scrolled out of the display window is still
+	// preserved, yet memory-capped so a long clean run cannot grow unbounded.
+	defaultBacklogLines = 200
+)
 
 // Model renders a spinner + rolling log tail and, when a total is known, a
 // progress bar. Driven entirely by the messages in messages.go.
 type Model struct {
-	title    string // run title (WithTitle); the BatchDone frame renders this
-	phase    string // current phase description; empty when no phase is active
-	tailMax  int
-	tail     []string
-	spinner  spinner.Model
-	progress progress.Model
+	title      string // run title (WithTitle); the BatchDone frame renders this
+	phase      string // current phase description; empty when no phase is active
+	tailMax    int
+	tail       []string
+	backlogMax int      // cap on the persisted failure backlog (crap#35)
+	backlog    []string // deeper history persisted above a ✗ verdict
+	spinner    spinner.Model
+	progress   progress.Model
 
 	current    int   // item-bar numerator
 	total      int   // item-bar denominator; 0 = indeterminate
@@ -37,6 +46,11 @@ type Option func(*Model)
 // WithTailLines sets the rolling-tail height (default 5). TUNING LEVER.
 func WithTailLines(n int) Option { return func(m *Model) { m.tailMax = n } }
 
+// WithFailureBacklog sets how many lines are persisted above a failing
+// phase's ✗ verdict (default 200), independent of the live tail height
+// (crap#35). TUNING LEVER.
+func WithFailureBacklog(n int) Option { return func(m *Model) { m.backlogMax = n } }
+
 // WithTitle sets the header label.
 func WithTitle(s string) Option { return func(m *Model) { m.title = s } }
 
@@ -45,9 +59,10 @@ func New(opts ...Option) Model {
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot
 	m := Model{
-		tailMax:  defaultTailLines,
-		spinner:  sp,
-		progress: progress.New(progress.WithDefaultGradient()),
+		tailMax:    defaultTailLines,
+		backlogMax: defaultBacklogLines,
+		spinner:    sp,
+		progress:   progress.New(progress.WithDefaultGradient()),
 	}
 	for _, o := range opts {
 		o(&m)
@@ -70,6 +85,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.tail = append(m.tail, msg.Text)
 		if len(m.tail) > m.tailMax {
 			m.tail = m.tail[len(m.tail)-m.tailMax:]
+		}
+		// The backlog is the deeper failure history (crap#35): it retains far
+		// more than the visible tail so a failure whose reason scrolled out of
+		// the window is still persisted above the ✗ verdict.
+		m.backlog = append(m.backlog, msg.Text)
+		if len(m.backlog) > m.backlogMax {
+			m.backlog = m.backlog[len(m.backlog)-m.backlogMax:]
 		}
 		return m, nil
 	case OperationStarted:
@@ -110,7 +132,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Err != nil {
 			m.err = msg.Err
 		} else {
-			m.tail = nil // collapse on success
+			m.tail, m.backlog = nil, nil // collapse on success
 		}
 		return m, nil
 	case BatchDone:
@@ -131,14 +153,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *Model) resetPhase() {
 	m.phase = ""
 	m.tail = nil
+	m.backlog = nil
 	m.current, m.total = 0, 0
 	m.bytesDone, m.bytesTotal = 0, 0
 }
 
 // renderPhaseEnd builds the persistent multi-line string for a phase
 // verdict, following tap's TTY-viewport design: ok collapses to one green
-// line; failure holds the tail (persisted above) + red line + a YAML-ish
-// diagnostic; a skip/todo directive renders dim with the directive text.
+// line; failure persists the failure backlog (crap#35 — deeper than the live
+// window) + red line + a YAML-ish diagnostic; a skip/todo directive renders
+// dim with the directive text.
 func (m Model) renderPhaseEnd(msg PhaseEnded) string {
 	desc := msg.Description
 	if desc == "" {
@@ -158,7 +182,10 @@ func (m Model) renderPhaseEnd(msg PhaseEnded) string {
 		return successStyle.Render("✓ " + desc)
 	default:
 		var b strings.Builder
-		for _, l := range m.tail { // hold the tail: persist it above
+		// Persist the failure backlog, not just the live window: a failure
+		// whose reason scrolled past the visible tail would otherwise be lost
+		// (crap#35).
+		for _, l := range m.backlog {
 			b.WriteString(tailStyle.Render("│ " + l))
 			b.WriteByte('\n')
 		}

@@ -24,6 +24,9 @@
       inputs.nixpkgs-master.follows = "nixpkgs-master";
       inputs.utils.follows = "utils";
     };
+    igloo.inputs.treefmt-nix.follows = "bats/treefmt-nix";
+    utils.inputs.systems.follows = "igloo/systems";
+    igloo.inputs.nixpkgs-master.follows = "nixpkgs-master";
   };
 
   outputs =

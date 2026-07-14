@@ -4,11 +4,11 @@
   inputs = {
     # Fork of upstream nixpkgs. overlays.default exposes buildGoApplication,
     # gomod2nix, mkGoEnv, and other amarbel-llc additions.
-    igloo.url = "github:amarbel-llc/igloo";
+    igloo.url = "git+https://github.com/amarbel-llc/igloo.git";
     nixpkgs-master.url = "github:NixOS/nixpkgs/567a49d1913ce81ac6e9582e3553dd90a955875f";
     utils.url = "https://flakehub.com/f/numtide/flake-utils/0.1.102";
     bats = {
-      url = "github:amarbel-llc/bats";
+      url = "git+https://code.linenisgreat.com/bats.git";
       inputs.igloo.follows = "igloo";
       inputs.nixpkgs-master.follows = "nixpkgs-master";
       inputs.utils.follows = "utils";
@@ -19,7 +19,7 @@
     # shellcheck; config lives in ./conformist.toml. Exposed as the flake
     # `formatter` and gated by `just lint-fmt` (conformist check).
     conformist = {
-      url = "github:amarbel-llc/conformist";
+      url = "git+https://github.com/amarbel-llc/conformist.git";
       inputs.igloo.follows = "igloo";
       inputs.nixpkgs-master.follows = "nixpkgs-master";
       inputs.utils.follows = "utils";

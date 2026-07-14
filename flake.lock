@@ -16,15 +16,15 @@
       "locked": {
         "lastModified": 1783992495,
         "narHash": "sha256-Ur6JvfN6m3GBFpZ7QXuN0tClhij8pi0xvD9iwDzyg+w=",
-        "owner": "amarbel-llc",
-        "repo": "bats",
+        "ref": "refs/heads/master",
         "rev": "cd0e74302b4535fccf3be6c3a37493d487d4e1da",
-        "type": "github"
+        "revCount": 2071,
+        "type": "git",
+        "url": "https://code.linenisgreat.com/bats.git"
       },
       "original": {
-        "owner": "amarbel-llc",
-        "repo": "bats",
-        "type": "github"
+        "type": "git",
+        "url": "https://code.linenisgreat.com/bats.git"
       }
     },
     "bun2nix": {
@@ -75,15 +75,15 @@
       "locked": {
         "lastModified": 1783949730,
         "narHash": "sha256-ilEJ9Wp+yrc1/3CK7NRQDdmJ0PTB+xJoS8Grslo7itg=",
-        "owner": "amarbel-llc",
-        "repo": "conformist",
+        "ref": "refs/heads/master",
         "rev": "1985c0c5fd4197ae944526ea9700caed259e1fe8",
-        "type": "github"
+        "revCount": 153,
+        "type": "git",
+        "url": "https://github.com/amarbel-llc/conformist.git"
       },
       "original": {
-        "owner": "amarbel-llc",
-        "repo": "conformist",
-        "type": "github"
+        "type": "git",
+        "url": "https://github.com/amarbel-llc/conformist.git"
       }
     },
     "flake-parts": {
@@ -123,15 +123,15 @@
       "locked": {
         "lastModified": 1783896868,
         "narHash": "sha256-pN9WzpM9sBz6DmQIlALLhAKIC9yrbY9rLa+qrYr8Ph8=",
-        "owner": "amarbel-llc",
-        "repo": "igloo",
+        "ref": "refs/heads/master",
         "rev": "e04bba9f87552e4161ebec00c528361316d36d3c",
-        "type": "github"
+        "revCount": 73,
+        "type": "git",
+        "url": "https://github.com/amarbel-llc/igloo.git"
       },
       "original": {
-        "owner": "amarbel-llc",
-        "repo": "igloo",
-        "type": "github"
+        "type": "git",
+        "url": "https://github.com/amarbel-llc/igloo.git"
       }
     },
     "nixpkgs-master": {

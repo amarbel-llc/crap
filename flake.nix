@@ -26,6 +26,7 @@
     };
     utils.inputs.systems.follows = "igloo/systems";
     igloo.inputs.nixpkgs-master.follows = "nixpkgs-master";
+    bats.inputs.conformist.follows = "conformist";
   };
 
   outputs =

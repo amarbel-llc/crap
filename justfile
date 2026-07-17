@@ -144,4 +144,4 @@ release new_version:
 
     just tag "$msg"
 
-    gh release create "go-crap/v{{new_version}}" --title "$header" --notes "$msg"
+    fj release create "$header" --tag "go-crap/v{{new_version}}" --body "$msg"

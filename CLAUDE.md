@@ -56,7 +56,7 @@ just lint-fmt       # read-only format/lint gate (conformist check)
 just codemod-fmt    # format all code via conformist (Go/Nix/Rust/shell)
 just run-nix <args> # run large-colon via nix run
 
-just release <ver>  # bump version.env, commit, tag go-crap/v<ver>, gh release
+just release <ver>  # bump version.env, commit, tag go-crap/v<ver>, fj release
 ```
 
 Formatting/linting is driven by **conformist** (the treefmt successor);

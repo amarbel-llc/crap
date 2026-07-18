@@ -16,10 +16,10 @@
         ]
       },
       "locked": {
-        "lastModified": 1784284789,
-        "narHash": "sha256-+Idrh71mfOtQFiChCpu59GCEo4gIw1gg64LWOaRiu4Y=",
+        "lastModified": 1784332933,
+        "narHash": "sha256-ENJc6JslaDhbNZ302YemlVRYRSpyoWoH3SBDq0MvUlQ=",
         "type": "tarball",
-        "url": "https://code.linenisgreat.com/bats/archive/524faca8837e626c0d588aa350cc31146bf37e22.tar.gz"
+        "url": "https://code.linenisgreat.com/bats/archive/e811e6382a83d69e3fea1c8e2c51317cd79c0263.tar.gz"
       },
       "original": {
         "type": "tarball",
@@ -72,10 +72,10 @@
         ]
       },
       "locked": {
-        "lastModified": 1784252369,
-        "narHash": "sha256-2Sjoir0SEdW1iw8x7N3KO7uOi7Jc/71P5ajCVFfgbts=",
+        "lastModified": 1784310418,
+        "narHash": "sha256-XqxuDSgy6rZSvQOprEQeLGqzI/d/2evH1cf9Wc+D5i8=",
         "type": "tarball",
-        "url": "https://code.linenisgreat.com/conformist/archive/255ce4249a043da02e57accb01f651b27f749978.tar.gz"
+        "url": "https://code.linenisgreat.com/conformist/archive/9abf54eeb6df0d544de7602e6007391d3c28f0dc.tar.gz"
       },
       "original": {
         "type": "tarball",

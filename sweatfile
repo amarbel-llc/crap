@@ -1,0 +1,14 @@
+# vim: set ft=toml
+
+# crap is a leaf Go+Rust tool repo (eng-design_patterns-justfile(7)): its
+# justfile `default` (validate lint build test) is the CI-equivalent lane, so
+# the pre-merge hook is just `just`. pre-commit names the config-specific,
+# toolchain-hermetic `conformist-pre-commit` wrapper (flake.nix's
+# conformistEval.config.build.preCommit, on the devShell PATH) rather than a
+# bare `conformist --staged --exit-zero-on-fix`, which would resolve
+# formatters from the ambient PATH instead of the pinned config/toolchain.
+# [[pre-merge-skills]] is inherited unchanged from the eng-root sweatfile.
+
+[hooks]
+pre-merge = "just"
+pre-commit = "conformist-pre-commit"

@@ -81,10 +81,21 @@
 
         # Impure lane: the git-state checks (git-remotes, sweatfile,
         # agents-md, gomod2nix) run against the working tree via
-        # `just lint-worktree`. crap has no sweatfile yet, so this lane is
-        # wired but not gated into `just lint` (see the justfile).
+        # `just lint-worktree`. Also carries clippy (conformist#69, opt-in —
+        # not in the eng-impure roster): impure because it compiles the
+        # crate, so it can only run here, never in the sandboxed
+        # checks.formatting. rust-crap has a real [package] (not a virtual
+        # workspace), but `--workspace` is harmless on a single crate and
+        # matches the module default; manifest-path points at the
+        # rust-crap/ subtree since Cargo.toml isn't at the repo root.
         conformistImpureEval = conformist.lib.evalModule pkgs {
-          imports = [ conformist.lib.presets.eng-impure ];
+          imports = [
+            conformist.lib.presets.eng-impure
+            {
+              linters.clippy.enable = true;
+              linters.clippy.manifest-path = "rust-crap/Cargo.toml";
+            }
+          ];
           package = conformistPkg;
           projectRootFile = "flake.nix";
         };

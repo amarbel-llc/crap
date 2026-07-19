@@ -157,7 +157,7 @@ func TestNodeEndDiagnosticRoundTrip(t *testing.T) {
 // Writer must be safe for concurrent producers (#23): records written from
 // multiple goroutines (ConvertExec's stdout/stderr pumps, reporter callers
 // emitting items from workers) must each land as one intact line. Run under
-// `just test-go-race` to catch the unsynchronized-encoder regression.
+// `just debug-go-test-race` to catch the unsynchronized-encoder regression.
 func TestWriterConcurrentWrites(t *testing.T) {
 	var buf bytes.Buffer
 	w := NewWriter(&buf)

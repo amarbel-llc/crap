@@ -59,9 +59,15 @@ just run-nix <args> # run large-colon via nix run
 just release <ver>  # bump version.env, commit, tag go-crap/v<ver>, fj release
 ```
 
-Formatting/linting is driven by **conformist** (the treefmt successor);
-config lives in `./conformist.toml`, wired as the flake `formatter`
-(`nix fmt`) and gated by `just lint-fmt`.
+Formatting/linting is driven by **conformist** (the treefmt successor),
+adopted via its Nix module (`conformist.lib.evalModule` in `flake.nix` +
+`./conformist.nix`, the eng-fleet convention — not a hand-written
+`conformist.toml`). `presets.eng` + `presets.eng-go` supply the
+eng-convention linters (eng-versioning, flake-outputs/lock, the
+justfile-\* roster) and the canonical goimports → gofumpt chain;
+`./conformist.nix` layers nixfmt/rustfmt/shfmt/shellcheck. Wired as the
+flake `formatter` (`nix fmt`) and `checks.formatting`, gated by both
+`just lint-fmt` and `nix flake check`.
 
 `version.env` (`CRAP_VERSION`) is the single version source of truth
 (eng-versioning(7)): flake.nix reads it for all three derivations, and the

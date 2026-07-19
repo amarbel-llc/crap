@@ -14,13 +14,29 @@ validate-devshell:
 
 lint: lint-fmt
 
-# Read-only format + lint gate via conformist (the treefmt successor).
-# Fails on formatter drift (Go/Nix/Rust/shell, per ./conformist.toml)
-# plus shellcheck. `just codemod-fmt` is the write mode. Folded into
-# `just lint` → `just default`, so CI and the pre-merge hook enforce
-# fmt-cleanliness on every merge.
+# Read-only format + lint gate via conformist (the treefmt successor),
+# through the sandboxed checks.formatting derivation (conformist.nix +
+# presets.eng/eng-go). Fails on formatter drift (Go/Nix/Rust/shell) plus
+# shellcheck and the eng-convention linters. `just codemod-fmt` is the
+# write mode. Folded into `just lint` → `just default`, so CI and the
+# pre-merge hook enforce fmt-cleanliness on every merge.
 lint-fmt:
-    nix develop --command conformist check
+    #!/usr/bin/env bash
+    set -euo pipefail
+    system=$(nix eval --raw --impure --expr 'builtins.currentSystem')
+    nix build ".#checks.${system}.formatting" --no-link --print-build-logs
+
+lint-impure: lint-worktree
+
+# The impure eng checks (git remotes, sweatfile, agents-md, gomod2nix)
+# against the working tree, where .git is available. Needs a sweatfile;
+# add lint-impure to the `lint` aggregate above once crap has one. Runs
+# conformist from the devShell (direnv `use flake`).
+lint-worktree:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cfg=$(nix build --no-link --print-out-paths '.#conformist-impure-config')
+    conformist check --config-file "$cfg" --tree-root .
 
 build: build-gomod2nix build-nix
 
@@ -29,21 +45,31 @@ build: build-gomod2nix build-nix
 build-gomod2nix:
     nix develop --command gomod2nix --dir go-crap
 
+# Build the default nix package (large-colon + crap-present, symlink-joined).
+# The fork's buildGoApplication burns CRAP_VERSION + the flake rev into the
+# Go binaries via -ldflags, which a raw `go build` would not.
 build-nix:
     nix build --show-trace
 
 test: test-go test-cargo
 
+# Go test suite (go-crap/...), via the root devShell's gomod2nix-aware go.
 test-go:
     cd go-crap && nix develop ../ --command go test ./...
 
-# Go tests under the race detector; catches concurrent-writer bugs like #23.
-test-go-race:
+# Go tests under the race detector: slower than `test-go`, so this is a
+# separate opt-in lane rather than part of the default `test` aggregate.
+# Catches concurrent-writer bugs like #23.
+[group("debug")]
+debug-go-test-race:
     cd go-crap && nix develop ../ --command go test -race ./...
 
+# Rust test suite (rust-crap's cargo test), via the devShell's pinned
+# rustc/cargo.
 test-cargo:
     nix develop --command cargo test --manifest-path rust-crap/Cargo.toml
 
+# Run large-colon (::) via `nix run`, forwarding ARGS to the CLI.
 run-nix *ARGS:
     nix run . -- {{ARGS}}
 
@@ -51,13 +77,14 @@ codemod-fmt: codemod-fmt-conformist
 
 # Format all source files via conformist (the treefmt successor): Go
 # (goimports → gofumpt), Nix (nixfmt), Rust (rustfmt), shell (shfmt).
-# Config lives in ./conformist.toml. The read-only counterpart is
-# `lint-fmt`.
+# Config lives in conformist.nix (conformist.lib.evalModule, flake.nix).
+# The read-only counterpart is `lint-fmt`.
 codemod-fmt-conformist:
-    nix develop --command conformist
+    nix fmt
 
 update: update-nix
 
+# Refresh all flake inputs to their latest revisions.
 update-nix:
     nix flake update
 
@@ -67,6 +94,7 @@ update-go: && build-gomod2nix
 
 clean: clean-build
 
+# Remove the nix build result symlink and the build/ output directory.
 clean-build:
     rm -rf result build/
 

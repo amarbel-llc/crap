@@ -14,10 +14,14 @@
       inputs.utils.follows = "utils";
     };
 
-    # conformist: the linter + formatter multiplexer (treefmt successor).
-    # Drives the goimports → gofumpt → nixfmt → rustfmt → shfmt chain plus
-    # shellcheck; config lives in ./conformist.toml. Exposed as the flake
-    # `formatter` and gated by `just lint-fmt` (conformist check).
+    # conformist: the linter + formatter multiplexer (treefmt successor),
+    # adopted via its Nix module (conformist.lib.evalModule) rather than a
+    # hand-written conformist.toml. presets.eng + presets.eng-go supply the
+    # eng-convention linters and the canonical goimports → gofumpt chain;
+    # ./conformist.nix layers nixfmt/rustfmt/shfmt/shellcheck +
+    # repo-specific excludes. Exposed as the flake `formatter` and gated by
+    # both `just lint-fmt` (the sandboxed checks.formatting derivation) and
+    # `nix flake check`.
     conformist = {
       url = "https://code.linenisgreat.com/conformist/archive/master.tar.gz";
       inputs.igloo.follows = "igloo";
@@ -61,21 +65,28 @@
         pkgs = import igloo { inherit system; };
         pkgs-master = import nixpkgs-master { inherit system; };
 
-        # `nix fmt` entry point: conformist (the treefmt successor) wrapped
-        # with the formatter binaries its ./conformist.toml drives on PATH.
-        # Formatting drift is gated by `just lint-fmt` (conformist check).
-        conformistFmt = pkgs.writeShellApplication {
-          name = "conformist-fmt";
-          runtimeInputs = [
-            conformist.packages.${system}.default
-            pkgs-master.gofumpt
-            pkgs-master.gotools
-            pkgs.nixfmt
-            pkgs-master.rustfmt
-            pkgs.shfmt
-            pkgs.shellcheck
+        conformistPkg = conformist.packages.${system}.default;
+
+        # Pure lane: the eng presets (+ the canonical goimports -> gofumpt
+        # chain) and this repo's overlay (./conformist.nix). Drives `nix fmt`
+        # and the sandboxed `checks.formatting`.
+        conformistEval = conformist.lib.evalModule pkgs {
+          imports = [
+            conformist.lib.presets.eng
+            conformist.lib.presets.eng-go
+            ./conformist.nix
           ];
-          text = ''exec conformist "$@"'';
+          package = conformistPkg;
+        };
+
+        # Impure lane: the git-state checks (git-remotes, sweatfile,
+        # agents-md, gomod2nix) run against the working tree via
+        # `just lint-worktree`. crap has no sweatfile yet, so this lane is
+        # wired but not gated into `just lint` (see the justfile).
+        conformistImpureEval = conformist.lib.evalModule pkgs {
+          imports = [ conformist.lib.presets.eng-impure ];
+          package = conformistPkg;
+          projectRootFile = "flake.nix";
         };
 
         # Producer side of the flake-input-go_mod protocol (RFC 0001):
@@ -168,10 +179,24 @@
             ;
           # go-crap module source for sibling-flake consumers (RFC 0001).
           inherit (goPkgs) go-pkgs;
+          # The generated config for the impure lane's `just lint-worktree`.
+          conformist-impure-config = conformistImpureEval.config.build.configFile;
+          # The store-pinned, toolchain-hermetic hook pair (conformist#47/#51/#54):
+          # pre-commit runs `conformist --staged --exit-zero-on-fix`; repair runs
+          # `conformist --commit --amend --exit-zero-on-fix`. Also on the devShell
+          # PATH below, under these same names, for a future sweatfile to wire.
+          conformist-pre-commit = conformistEval.config.build.preCommit;
+          conformist-repair = conformistEval.config.build.repair;
         };
 
-        # `nix fmt` runs conformist (see conformistFmt above).
-        formatter = conformistFmt;
+        # `nix fmt` runs conformist wrapped with the generated config
+        # (conformistEval above).
+        formatter = conformistEval.config.build.wrapper;
+
+        # Sandboxed read-only gate: `conformist check` against a /nix/store
+        # snapshot of the tracked tree, no writes. Gated by `just lint-fmt`
+        # and `nix flake check`.
+        checks.formatting = conformistEval.config.build.check self;
 
         devShells.default = pkgs.mkShell {
           packages = [
@@ -207,10 +232,17 @@
             pkgs-master.shellcheck
             pkgs-master.shfmt
 
-            # conformist (treefmt successor) + nixfmt, the one formatter
-            # its ./conformist.toml drives that isn't already above, so
-            # `just codemod-fmt` / `just lint-fmt` work in the devshell.
-            conformist.packages.${system}.default
+            # conformist (treefmt successor) + the store-pinned hook pair
+            # from this repo's own config (conformistEval above) — `nix fmt`
+            # / `just lint-fmt` / `just codemod-fmt` resolve their formatter
+            # binaries from the generated config, not from PATH, so no
+            # per-formatter package needs to be listed here for those to
+            # work; gofumpt/rustfmt/shfmt/shellcheck above remain for
+            # interactive/LSP use (gopls, rust-analyzer,
+            # bash-language-server).
+            conformistPkg
+            conformistEval.config.build.preCommit
+            conformistEval.config.build.repair
             pkgs.nixfmt
 
             # Tools

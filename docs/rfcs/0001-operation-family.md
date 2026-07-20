@@ -308,7 +308,7 @@ spinner-bar) and refine via `progress`.
 
 ### 10. Producer reporter API (Go)
 
-`github.com/amarbel-llc/crap/go-crap/v2/crap` (new package) MUST provide an
+`code.linenisgreat.com/crap/go-crap/v2/crap` (new package) MUST provide an
 ergonomic reporter so producers do not hand-write `ndjsoncrap.Writer`
 records. The API unifies the three point-kinds. The following is the
 normative surface (names illustrative; signatures are the contract):
@@ -452,7 +452,7 @@ Tests use binary injection via `bats-emo`:
   (it would ignore the unknown wire records); presenters MUST add the
   `ItemFailed` handler plus the operation-family driver mappings to conform.
 - **Module path.** The reporter API ships under
-  `github.com/amarbel-llc/crap/go-crap/v2` (the `/v2` module). No v0/v1
+  `code.linenisgreat.com/crap/go-crap/v2` (the `/v2` module). No v0/v1
   consumers exist for the new `crap` package.
 - **Producer migration.** Tools currently hand-writing `ndjsoncrap.Writer`
   records (e.g. madder sync's `syncCrapSink`) SHOULD migrate to the reporter

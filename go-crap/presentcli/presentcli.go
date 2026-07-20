@@ -9,7 +9,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/amarbel-llc/crap/go-crap/v2/viewport"
+	"code.linenisgreat.com/crap/go-crap/v2/viewport"
 )
 
 // Usage is the one-line help text shared by both entry points.

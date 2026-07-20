@@ -19,8 +19,8 @@ import (
 	"os/signal"
 	"path/filepath"
 
-	crap "github.com/amarbel-llc/crap/go-crap/v2"
-	"github.com/amarbel-llc/crap/go-crap/v2/ndjsoncrap"
+	crap "code.linenisgreat.com/crap/go-crap/v2"
+	"code.linenisgreat.com/crap/go-crap/v2/ndjsoncrap"
 )
 
 // version and commit are injected at release build time by the

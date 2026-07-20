@@ -14,7 +14,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/amarbel-llc/crap/go-crap/v2/presentcli"
+	"code.linenisgreat.com/crap/go-crap/v2/presentcli"
 )
 
 // version and commit are injected at release build time by the

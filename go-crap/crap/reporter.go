@@ -14,7 +14,7 @@ import (
 	"io"
 	"time"
 
-	"github.com/amarbel-llc/crap/go-crap/v2/ndjsoncrap"
+	"code.linenisgreat.com/crap/go-crap/v2/ndjsoncrap"
 )
 
 // ReporterOptions configures a Reporter. When Title or Source is set, the

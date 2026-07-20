@@ -83,7 +83,7 @@ rewrites version.env, Cargo.toml, and Cargo.lock together.
 
 ### Go library (`go-crap/`)
 
-The Go module (`github.com/amarbel-llc/crap/go-crap/v2`) is both a library and the
+The Go module (`code.linenisgreat.com/crap/go-crap/v2`) is both a library and the
 source for the `large-colon` (`::`) and `crap-present` CLIs. It is built
 around ndjson-crap + the viewport. Key packages/files:
 

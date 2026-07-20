@@ -8,7 +8,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/amarbel-llc/crap/go-crap/v2/ndjsoncrap"
+	"code.linenisgreat.com/crap/go-crap/v2/ndjsoncrap"
 )
 
 // sender is the subset of *tea.Program the driver uses, narrowed so tests

@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	crap "github.com/amarbel-llc/crap/go-crap/v2"
+	crap "code.linenisgreat.com/crap/go-crap/v2"
 )
 
 func TestParseExecArgs(t *testing.T) {

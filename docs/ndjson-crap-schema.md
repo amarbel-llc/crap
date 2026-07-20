@@ -174,7 +174,7 @@ All fields are always present; nullable fields use `null`.
 
 ## Go API
 
-`github.com/amarbel-llc/crap/go-crap/v2/ndjsoncrap`:
+`code.linenisgreat.com/crap/go-crap/v2/ndjsoncrap`:
 
 - `Reader` / `Writer` — tolerant decode (accepts just-us aliases, skips blank
   lines, unknown types → `Unknown`) and canonical encode.
@@ -182,7 +182,7 @@ All fields are always present; nullable fields use `null`.
   `NodeStart`, `Command`, `Output`, `NodeEnd`, `OperationStart`, `Progress`,
   `Item`, `OperationEnd`, `Unknown`.
 
-`github.com/amarbel-llc/crap/go-crap/v2/viewport`:
+`code.linenisgreat.com/crap/go-crap/v2/viewport`:
 
 - `Present(in, Options)` — render an ndjson-crap stream via the bubbletea
   viewport on a TTY, or a plain verdict-per-line fallback off a TTY.
@@ -190,7 +190,7 @@ All fields are always present; nullable fields use `null`.
   cutting-garden's `capture_viewport`, itself a WET copy of purse-first
   FDR 0010's operation_viewport).
 
-`github.com/amarbel-llc/crap/go-crap/v2/crap`:
+`code.linenisgreat.com/crap/go-crap/v2/crap`:
 
 - `Reporter` — the producer-side API (crap RFC 0001 §10): `TestStream`
   (result family), `Operation` (operation family), and `Phase` (execution

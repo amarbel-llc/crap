@@ -8,7 +8,7 @@ package crap
 import (
 	"io"
 
-	"github.com/amarbel-llc/crap/go-crap/v2/ndjsoncrap"
+	"code.linenisgreat.com/crap/go-crap/v2/ndjsoncrap"
 )
 
 // writeResultStream emits a complete result-family ndjson-crap stream: a Meta

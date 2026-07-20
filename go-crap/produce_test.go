@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/amarbel-llc/crap/go-crap/v2/ndjsoncrap"
+	"code.linenisgreat.com/crap/go-crap/v2/ndjsoncrap"
 )
 
 // collect decodes every record from an ndjson-crap stream.

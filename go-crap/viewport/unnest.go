@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/amarbel-llc/crap/go-crap/v2/ndjsoncrap"
+	"code.linenisgreat.com/crap/go-crap/v2/ndjsoncrap"
 )
 
 // maxUnnestDepth bounds recursive unwrapping so a pathological (or cyclic)

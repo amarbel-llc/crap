@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/amarbel-llc/crap/go-crap/v2/ndjsoncrap"
+	"code.linenisgreat.com/crap/go-crap/v2/ndjsoncrap"
 )
 
 // wrapOutput builds the JSON encoding of an output record carrying data, as it

@@ -132,7 +132,7 @@
 
           meta = {
             description = "CRAP-2 validator and writer toolkit";
-            homepage = "https://github.com/amarbel-llc/crap";
+            homepage = "https://code.linenisgreat.com/crap";
             license = pkgs.lib.licenses.mit;
           };
         };
@@ -150,7 +150,7 @@
 
           meta = {
             description = "ndjson-crap viewport presenter (standalone)";
-            homepage = "https://github.com/amarbel-llc/crap";
+            homepage = "https://code.linenisgreat.com/crap";
             license = pkgs.lib.licenses.mit;
           };
         };
@@ -169,7 +169,7 @@
 
           meta = {
             description = "CRAP-2 writer library";
-            homepage = "https://github.com/amarbel-llc/crap";
+            homepage = "https://code.linenisgreat.com/crap";
             license = pkgs.lib.licenses.mit;
           };
         };

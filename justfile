@@ -6,6 +6,8 @@ validate: validate-devshell
 # mkGoEnv / gomod2nix.toml breakage that the prod-binary build can mask.
 # Uses builtins.currentSystem (not a hardcoded system) because CI also
 # runs aarch64-darwin. No store-output usage --- just a build-check.
+#
+# verify the devShell evaluates and builds without errors
 validate-devshell:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -20,6 +22,8 @@ lint: lint-fmt
 # shellcheck and the eng-convention linters. `just codemod-fmt` is the
 # write mode. Folded into `just lint` → `just default`, so CI and the
 # pre-merge hook enforce fmt-cleanliness on every merge.
+#
+# check formatting and the eng-convention linters without modifying files
 lint-fmt:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -32,6 +36,8 @@ lint-impure: lint-worktree
 # against the working tree, where .git is available. Needs a sweatfile;
 # add lint-impure to the `lint` aggregate above once crap has one. Runs
 # conformist from the devShell (direnv `use flake`).
+#
+# run the impure eng conformist checks against the working tree
 lint-worktree:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -42,12 +48,16 @@ build: build-gomod2nix build-nix
 
 # Regenerate go-crap/gomod2nix.toml from go.mod/go.sum so the nix build
 # resolves the same module set the worktree sees.
+#
+# regenerate go-crap/gomod2nix.toml from go.mod / go.sum
 build-gomod2nix:
     nix develop --command gomod2nix --dir go-crap
 
 # Build the default nix package (large-colon + crap-present, symlink-joined).
 # The fork's buildGoApplication burns CRAP_VERSION + the flake rev into the
 # Go binaries via -ldflags, which a raw `go build` would not.
+#
+# build the default nix package (large-colon + crap-present)
 build-nix:
     nix build --show-trace
 
@@ -60,12 +70,16 @@ test-go:
 # Go tests under the race detector: slower than `test-go`, so this is a
 # separate opt-in lane rather than part of the default `test` aggregate.
 # Catches concurrent-writer bugs like #23.
+#
+# run the Go test suite under the race detector
 [group("debug")]
 debug-go-test-race:
     cd go-crap && nix develop ../ --command go test -race ./...
 
 # Rust test suite (rust-crap's cargo test), via the devShell's pinned
 # rustc/cargo.
+#
+# run the Rust test suite via cargo test
 test-cargo:
     nix develop --command cargo test --manifest-path rust-crap/Cargo.toml
 
@@ -79,6 +93,8 @@ codemod-fmt: codemod-fmt-conformist
 # (goimports → gofumpt), Nix (nixfmt), Rust (rustfmt), shell (shfmt).
 # Config lives in conformist.nix (conformist.lib.evalModule, flake.nix).
 # The read-only counterpart is `lint-fmt`.
+#
+# format all source files via conformist
 codemod-fmt-conformist:
     nix fmt
 
@@ -104,6 +120,8 @@ clean-build:
 # Cargo.toml's version field is mandatory and can't read version.env
 # itself; see amarbel-llc/eng#162). Pure mutation: staging and
 # committing is `release`'s responsibility. Usage: just bump-version 0.1.1
+#
+# rewrite CRAP_VERSION in version.env and resync Cargo.toml / Cargo.lock
 [group("maintenance")]
 bump-version new_version:
     sed -E -i "s/^(export CRAP_VERSION)=.*/\\1={{new_version}}/" version.env
@@ -114,6 +132,8 @@ bump-version new_version:
 # version.env. The go-crap/ tag prefix is required by the Go module
 # proxy for sub-directory modules. The $message env-param form avoids
 # {{ }} splicing a changelog with backticks into the script.
+#
+# sign and push a go-crap/v<version> tag for the current CRAP_VERSION
 [group("maintenance")]
 tag $message:
     #!/usr/bin/env bash
@@ -130,6 +150,8 @@ tag $message:
 # go-crap/v* tag (unscoped --- crap is polyglot with one repo-wide
 # version), bump version.env, commit, tag, and create the GitHub
 # release. Usage: just release 0.1.1
+#
+# cut a release from master: bump, commit, tag, and publish the release
 [group("maintenance")]
 release new_version:
     #!/usr/bin/env bash

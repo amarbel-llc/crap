@@ -63,7 +63,7 @@ build-nix:
 
 test: test-go test-cargo
 
-# Go test suite (go-crap/...), via the root devShell's gomod2nix-aware go.
+# run the Go test suite (go-crap/...) via the root devShell's gomod2nix-aware go
 test-go:
     cd go-crap && nix develop ../ --command go test ./...
 
@@ -83,7 +83,7 @@ debug-go-test-race:
 test-cargo:
     nix develop --command cargo test --manifest-path rust-crap/Cargo.toml
 
-# Run large-colon (::) via `nix run`, forwarding ARGS to the CLI.
+# run large-colon (::) via `nix run`, forwarding ARGS to the CLI
 run-nix *ARGS:
     nix run . -- {{ARGS}}
 
@@ -100,17 +100,17 @@ codemod-fmt-conformist:
 
 update: update-nix
 
-# Refresh all flake inputs to their latest revisions.
+# refresh all flake inputs to their latest revisions
 update-nix:
     nix flake update
 
-# Tidy the Go module, then regenerate gomod2nix.toml to match.
+# tidy the Go module, then regenerate gomod2nix.toml to match
 update-go: && build-gomod2nix
     cd go-crap && nix develop ../ --command go mod tidy
 
 clean: clean-build
 
-# Remove the nix build result symlink and the build/ output directory.
+# remove the nix build result symlink and the build/ output directory
 clean-build:
     rm -rf result build/
 

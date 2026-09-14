@@ -3,7 +3,8 @@ default: validate lint build test
 validate: validate-devshell
 
 # Verify the devShell evaluates and builds without errors. Catches
-# mkGoEnv / gomod2nix.toml breakage that the prod-binary build can mask.
+# devshell-only breakage (godyn-go / godyn-test, toolchain pins) that the
+# prod-binary build can mask.
 # Uses builtins.currentSystem (not a hardcoded system) because CI also
 # runs aarch64-darwin. No store-output usage --- just a build-check.
 #
@@ -14,7 +15,18 @@ validate-devshell:
     system=$(nix eval --raw --impure --expr 'builtins.currentSystem')
     nix build --no-link ".#devShells.${system}.default"
 
-lint: lint-fmt
+lint: lint-fmt lint-go
+
+# godyn-lint over go-crap (cmd/vet passes + staticcheck defaults, from
+# go-crap/go.nix) as a sandboxed flake check. Replaces the golangci-lint
+# set, which needs a go.mod in the checkout (igloo godyn(7) § LINT).
+#
+# lint the go-crap module via godyn-lint
+lint-go:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    system=$(nix eval --raw --impure --expr 'builtins.currentSystem')
+    nix build --no-link --print-build-logs ".#checks.${system}.go-lint"
 
 # Read-only format + lint gate via conformist (the treefmt successor),
 # through the sandboxed checks.formatting derivation (conformist.nix +
@@ -44,18 +56,11 @@ lint-worktree:
     cfg=$(nix build --no-link --print-out-paths '.#conformist-impure-config')
     conformist check --config-file "$cfg" --tree-root .
 
-build: build-gomod2nix build-nix
-
-# Regenerate go-crap/gomod2nix.toml from go.mod/go.sum so the nix build
-# resolves the same module set the worktree sees.
-#
-# regenerate go-crap/gomod2nix.toml from go.mod / go.sum
-build-gomod2nix:
-    nix develop --command gomod2nix --dir go-crap
+build: build-nix
 
 # Build the default nix package (large-colon + crap-present, symlink-joined).
-# The fork's buildGoApplication burns CRAP_VERSION + the flake rev into the
-# Go binaries via -ldflags, which a raw `go build` would not.
+# igloo's buildGoAuto burns CRAP_VERSION + the flake rev into the Go
+# binaries via -ldflags, which a raw `go build` would not.
 #
 # build the default nix package (large-colon + crap-present)
 build-nix:
@@ -63,18 +68,33 @@ build-nix:
 
 test: test-go test-cargo
 
-# run the Go test suite (go-crap/...) via the root devShell's gomod2nix-aware go
+# godyn's per-package go test runs and vet over go-crap (from go-crap/go.nix),
+# as flake checks: an unchanged package's tests never re-run.
+#
+# run the Go test suite (go-crap/...) and go vet via godyn flake checks
 test-go:
-    cd go-crap && nix develop ../ --command go test ./...
+    #!/usr/bin/env bash
+    set -euo pipefail
+    system=$(nix eval --raw --impure --expr 'builtins.currentSystem')
+    nix build --no-link --print-build-logs ".#checks.${system}.go-tests" ".#checks.${system}.go-vet"
 
-# Go tests under the race detector: slower than `test-go`, so this is a
-# separate opt-in lane rather than part of the default `test` aggregate.
-# Catches concurrent-writer bugs like #23.
+# Go tests under the race detector (godyn `race = true`): slower than
+# `test-go`, so this is a separate opt-in lane rather than part of the
+# default `test` aggregate. Catches concurrent-writer bugs like #23.
 #
 # run the Go test suite under the race detector
 [group("debug")]
 debug-go-test-race:
-    cd go-crap && nix develop ../ --command go test -race ./...
+    nix build --no-link --print-build-logs ".#large-colon-race.passthru.checkAll"
+
+# One go-crap package's tests from the dirty tree (godyn-test), with test
+# binary flags after `--`: the edit-test inner loop. A new file needs
+# `git add -N` first. Usage: just debug-go-test viewport -- -test.run=TestX
+#
+# run one go-crap package's tests from the working tree via godyn-test
+[group("debug")]
+debug-go-test dir *FLAGS:
+    nix develop --command godyn-test -A "packages.$(nix eval --raw --impure --expr builtins.currentSystem).large-colon" {{dir}} {{FLAGS}}
 
 # Rust test suite (rust-crap's cargo test), via the devShell's pinned
 # rustc/cargo.
@@ -104,9 +124,12 @@ update: update-nix
 update-nix:
     nix flake update
 
-# tidy the Go module, then regenerate gomod2nix.toml to match
-update-go: && build-gomod2nix
-    cd go-crap && nix develop ../ --command go mod tidy
+# `go mod tidy` inside nix against go-crap's rendered module (godyn-go's
+# escape hatch), writing the result back into go-crap/go.nix.
+#
+# tidy the Go module inside nix and rewrite go-crap/go.nix
+update-go:
+    nix develop --command godyn-go -A "packages.$(nix eval --raw --impure --expr builtins.currentSystem).large-colon" -m go-crap/go.nix -- go mod tidy
 
 clean: clean-build
 

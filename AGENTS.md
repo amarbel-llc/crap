@@ -47,12 +47,14 @@ and nix are unavailable in the dev container, so they were not verified here).
 
 ``` sh
 just                # default: validate lint build test (the CI/merge gate)
-just build          # regenerate gomod2nix.toml + nix build --show-trace
+just build          # nix build --show-trace
 just test           # run all tests (Go + Rust)
-just test-go        # Go tests only (cd go-crap && go test ./...)
+just test-go        # Go tests + vet only (godyn flake checks from go-crap/go.nix)
 just test-cargo     # Rust tests only (cargo test)
+just update-go      # go mod tidy inside nix (godyn-go), rewrites go-crap/go.nix
 
 just lint-fmt       # read-only format/lint gate (conformist check)
+just lint-go        # godyn-lint over go-crap (sandboxed flake check)
 just codemod-fmt    # format all code via conformist (Go/Nix/Rust/shell)
 just run-nix <args> # run large-colon via nix run
 
@@ -70,8 +72,8 @@ flake `formatter` (`nix fmt`) and `checks.formatting`, gated by both
 `just lint-fmt` and `nix flake check`.
 
 `version.env` (`CRAP_VERSION`) is the single version source of truth
-(eng-versioning(7)): flake.nix reads it for all three derivations, and the
-fork's `buildGoApplication` burns it into the Go binaries as
+(eng-versioning(7)): flake.nix reads it for all three derivations, and
+igloo's `buildGoAuto` burns it into the Go binaries as
 `-X main.version` (commit from the flake rev). `:: version` /
 `crap-present --version` print `<version>+<commit>`.
 `rust-crap/Cargo.toml`'s `package.version` must mirror it:
@@ -131,13 +133,16 @@ rewriting.
 ## Nix Flake
 
 Uses the standard stable-first nixpkgs convention (see parent `eng` CLAUDE.md).
-DevShell combines Go, Rust, and shell devenvs (Go via `mkGoEnv` +
-the `gomod2nix` CLI).
+DevShell combines Go tooling, Rust, and shell devenvs. It has no ambient
+`go`: go-crap's dependencies live in `go-crap/go.nix` (igloo FDR 0008), with
+no go.mod, go.sum or gomod2nix.toml in the checkout.
 
-The Go binaries build with the fork's `buildGoApplication` against
-`go-crap/gomod2nix.toml` (no vendoring; regenerate with
-`just build-gomod2nix` after dependency changes, or `just update-go` to
-tidy + regenerate).
+The Go binaries build with igloo's `buildGoAuto` from that manifest (godyn,
+per-package, with tests/vet/lint as flake checks; buildGoApplication off
+godyn's systems), self-consuming the published `go-pkgs-test`. Go commands
+that need a go.mod (`go get`, `go mod tidy`) run inside nix through
+`godyn-go`, which rewrites go.nix; `just debug-go-test <dir>` runs one
+package's tests from the working tree via `godyn-test`.
 
 ## `::` Responsibility Model
 

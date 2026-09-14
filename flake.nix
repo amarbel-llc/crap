@@ -2,8 +2,8 @@
   description = "CRAP: Command Result Accessibility Protocol";
 
   inputs = {
-    # Fork of upstream nixpkgs. overlays.default exposes buildGoApplication,
-    # gomod2nix, mkGoEnv, and other amarbel-llc additions.
+    # Fork of upstream nixpkgs. overlays.default exposes buildGoAuto, godyn,
+    # mkGoPkgs, godyn-go, and other amarbel-llc additions.
     igloo.url = "https://code.linenisgreat.com/igloo/archive/master.tar.gz";
     nixpkgs-master.url = "github:NixOS/nixpkgs/f13ff45afd1bb73e640eaa08a7066dbed07e3238";
     utils.url = "https://flakehub.com/f/numtide/flake-utils/0.1.102";
@@ -102,57 +102,89 @@
 
         # Producer side of the flake-input-go_mod protocol (RFC 0001):
         # exposes the go-crap module's source tree as `go-pkgs` so sibling
-        # flakes (e.g. cutting-garden) can bridge it via goFlakeInputs
-        # instead of fetching a published version. crap is polyglot, so the
-        # module manifests are anchored under go-crap/.
+        # flakes (spinclass, cutting-garden) bridge it with subPath "go-crap".
+        # go-crap/go.nix (igloo FDR 0008) replaces go.mod/go.sum/gomod2nix.toml:
+        # mkGoPkgs renders go.mod and gomod2nix.toml at go-pkgs/go-crap/, so the
+        # consumer layout is unchanged.
         goPkgs = pkgs.mkGoPkgs {
           src = self;
-          extras = [
-            "^go-crap/go\\.mod$"
-            "^go-crap/go\\.sum$"
-          ];
+          manifest = ./go-crap/go.nix;
+          subPath = "go-crap";
+          name = "crap";
         };
 
-        large-colon = pkgs.buildGoApplication {
-          pname = "large-colon";
-          version = crapVersion;
-          commit = crapCommit;
-          src = ./go-crap;
-          pwd = ./go-crap;
-          modules = ./go-crap/gomod2nix.toml;
-          subPackages = [ "cmd/large-colon" ];
-          go = pkgs-master.go_1_26;
-          GOTOOLCHAIN = "local";
+        # The module as the producer publishes it (tests included): the
+        # RFC 0001 self-consumption contract. Its go.mod is go.nix's render,
+        # which buildGoAuto accepts alongside the same manifest.
+        goCrapSrc = goPkgs.go-pkgs-test + "/go-crap";
 
+        # Shared by every go-crap binary: godyn (per-package) on igloo's
+        # godynSystems, buildGoApplication elsewhere; both reachable as
+        # passthru.native / passthru.bga, gates keyed off passthru.backend.
+        mkGoCrapBinary =
+          {
+            pname,
+            description,
+            extraArgs ? { },
+          }:
+          (pkgs.buildGoAuto (
+            {
+              inherit pname;
+              version = crapVersion;
+              src = goCrapSrc;
+              manifest = ./go-crap/go.nix;
+              subPackages = [ "cmd/${pname}" ];
+              nativeArgs.commit = crapCommit;
+              bgaArgs = {
+                commit = crapCommit;
+                go = pkgs-master.go_1_26;
+                GOTOOLCHAIN = "local";
+              };
+            }
+            // extraArgs
+          )).overrideAttrs
+            (old: {
+              meta = (old.meta or { }) // {
+                inherit description;
+                homepage = "https://code.linenisgreat.com/crap";
+                license = pkgs.lib.licenses.mit;
+                mainProgram = pname;
+              };
+            });
+
+        # large-colon also carries go-crap's test, vet and lint lanes (godyn
+        # derives the whole module's test graph, not just cmd/large-colon's).
+        largeColonArgs = {
+          tests = true;
           nativeCheckInputs = [ pkgs-master.git ];
-
           postInstall = ''
             ln -s $out/bin/large-colon "$out/bin/::"
           '';
+        };
 
-          meta = {
-            description = "CRAP-2 validator and writer toolkit";
-            homepage = "https://code.linenisgreat.com/crap";
-            license = pkgs.lib.licenses.mit;
+        large-colon = mkGoCrapBinary {
+          pname = "large-colon";
+          description = "CRAP-2 validator and writer toolkit";
+          extraArgs = largeColonArgs;
+        };
+
+        # The same tests under the race detector: `just debug-go-test-race`.
+        large-colon-race = mkGoCrapBinary {
+          pname = "large-colon";
+          description = "CRAP-2 validator and writer toolkit (race)";
+          # godyn's -race links externally through cc (cmd/go needs cgo for it).
+          extraArgs = largeColonArgs // {
+            race = true;
+            nativeArgs = {
+              commit = crapCommit;
+              cc = pkgs.stdenv.cc;
+            };
           };
         };
 
-        crap-present = pkgs.buildGoApplication {
+        crap-present = mkGoCrapBinary {
           pname = "crap-present";
-          version = crapVersion;
-          commit = crapCommit;
-          src = ./go-crap;
-          pwd = ./go-crap;
-          modules = ./go-crap/gomod2nix.toml;
-          subPackages = [ "cmd/crap-present" ];
-          go = pkgs-master.go_1_26;
-          GOTOOLCHAIN = "local";
-
-          meta = {
-            description = "ndjson-crap viewport presenter (standalone)";
-            homepage = "https://code.linenisgreat.com/crap";
-            license = pkgs.lib.licenses.mit;
-          };
+          description = "ndjson-crap viewport presenter (standalone)";
         };
 
         rust-crap = pkgs-master.rustPlatform.buildRustPackage {
@@ -185,6 +217,7 @@
           };
           inherit
             large-colon
+            large-colon-race
             crap-present
             rust-crap
             ;
@@ -207,16 +240,25 @@
         # Sandboxed read-only gate: `conformist check` against a /nix/store
         # snapshot of the tracked tree, no writes. Gated by `just lint-fmt`
         # and `nix flake check`.
-        checks.formatting = conformistEval.config.build.check self;
+        checks = {
+          formatting = conformistEval.config.build.check self;
+        }
+        # godyn lanes from go-crap/go.nix: per-package tests, vet, and
+        # godyn-lint (cmd/vet passes + staticcheck defaults). On the bga
+        # backend there is no per-package lane; the binaries still build.
+        // pkgs.lib.optionalAttrs (large-colon.passthru.backend == "native") {
+          go-tests = large-colon.passthru.checkAll;
+          go-vet = large-colon.passthru.vetAll;
+          go-lint = large-colon.passthru.lintAll;
+        };
 
         devShells.default = pkgs.mkShell {
           packages = [
-            # Go: gomod2nix-aware env; reads go-crap/gomod2nix.toml for
-            # module resolution (drop-in for a bare go toolchain).
-            (pkgs.mkGoEnv { pwd = ./go-crap; })
-            # gomod2nix CLI lives in the fork's overlay alongside
-            # buildGoApplication / mkGoEnv — not in upstream nixpkgs.
-            pkgs.gomod2nix
+            # Go: no ambient `go` (igloo FDR 0007/0008). Dependencies live in
+            # go-crap/go.nix; go commands run inside nix through godyn-go,
+            # single-package tests through godyn-test.
+            pkgs.godyn-go
+            pkgs.godyn-test
             pkgs-master.gopls
             pkgs-master.gotools
             pkgs-master.gofumpt

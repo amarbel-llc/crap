@@ -63,9 +63,7 @@
   # this migration).
   settings.excludes = [
     "flake.lock"
-    "go.sum"
     "Cargo.lock"
-    "gomod2nix.toml"
     "version.env"
     "LICENSE"
     "*.md"

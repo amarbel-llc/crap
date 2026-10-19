@@ -56,257 +56,269 @@
       # clean release), "unknown" as a last-resort fallback.
       crapCommit = self.shortRev or self.dirtyShortRev or "unknown";
     in
-    utils.lib.eachDefaultSystem (
-      system:
-      let
-        # The fork's default.nix shim auto-applies overlays.default, so an
-        # explicit `overlays = [ igloo.overlays.default ]` would just
-        # compose the overlay twice.
-        pkgs = import igloo { inherit system; };
-        pkgs-master = import nixpkgs-master { inherit system; };
+    # Explicit systems: igloo/systems (nix-systems/default) omits
+    # x86_64-darwin, which nixos-26.05 is the last nixpkgs release to support.
+    utils.lib.eachSystem
+      [
+        "x86_64-linux"
+        "aarch64-linux"
+        "aarch64-darwin"
+        "x86_64-darwin"
+      ]
+      (
+        system:
+        let
+          # The fork's default.nix shim auto-applies overlays.default, so an
+          # explicit `overlays = [ igloo.overlays.default ]` would just
+          # compose the overlay twice.
+          pkgs = import igloo {
+            inherit system;
+            nixpkgs = nixpkgs-master;
+          };
+          pkgs-master = import nixpkgs-master { inherit system; };
 
-        conformistPkg = conformist.packages.${system}.default;
+          conformistPkg = conformist.packages.${system}.default;
 
-        # Pure lane: the eng presets (+ the canonical goimports -> gofumpt
-        # chain) and this repo's overlay (./conformist.nix). Drives `nix fmt`
-        # and the sandboxed `checks.formatting`.
-        conformistEval = conformist.lib.evalModule pkgs {
-          imports = [
-            conformist.lib.presets.eng
-            conformist.lib.presets.eng-go
-            ./conformist.nix
-          ];
-          package = conformistPkg;
-        };
+          # Pure lane: the eng presets (+ the canonical goimports -> gofumpt
+          # chain) and this repo's overlay (./conformist.nix). Drives `nix fmt`
+          # and the sandboxed `checks.formatting`.
+          conformistEval = conformist.lib.evalModule pkgs {
+            imports = [
+              conformist.lib.presets.eng
+              conformist.lib.presets.eng-go
+              ./conformist.nix
+            ];
+            package = conformistPkg;
+          };
 
-        # Impure lane: the git-state checks (git-remotes, sweatfile,
-        # agents-md, gomod2nix) run against the working tree via
-        # `just lint-worktree`. Also carries clippy (conformist#69, opt-in —
-        # not in the eng-impure roster): impure because it compiles the
-        # crate, so it can only run here, never in the sandboxed
-        # checks.formatting. rust-crap has a real [package] (not a virtual
-        # workspace), but `--workspace` is harmless on a single crate and
-        # matches the module default; manifest-path points at the
-        # rust-crap/ subtree since Cargo.toml isn't at the repo root.
-        conformistImpureEval = conformist.lib.evalModule pkgs {
-          imports = [
-            conformist.lib.presets.eng-impure
+          # Impure lane: the git-state checks (git-remotes, sweatfile,
+          # agents-md, gomod2nix) run against the working tree via
+          # `just lint-worktree`. Also carries clippy (conformist#69, opt-in —
+          # not in the eng-impure roster): impure because it compiles the
+          # crate, so it can only run here, never in the sandboxed
+          # checks.formatting. rust-crap has a real [package] (not a virtual
+          # workspace), but `--workspace` is harmless on a single crate and
+          # matches the module default; manifest-path points at the
+          # rust-crap/ subtree since Cargo.toml isn't at the repo root.
+          conformistImpureEval = conformist.lib.evalModule pkgs {
+            imports = [
+              conformist.lib.presets.eng-impure
+              {
+                linters.clippy.enable = true;
+                linters.clippy.manifest-path = "rust-crap/Cargo.toml";
+              }
+            ];
+            package = conformistPkg;
+            projectRootFile = "flake.nix";
+          };
+
+          # Producer side of the flake-input-go_mod protocol (RFC 0001):
+          # exposes the go-crap module's source tree as `go-pkgs` so sibling
+          # flakes (spinclass, cutting-garden) bridge it with subPath "go-crap".
+          # go-crap/go.nix (igloo FDR 0008) replaces go.mod/go.sum/gomod2nix.toml:
+          # mkGoPkgs renders go.mod and gomod2nix.toml at go-pkgs/go-crap/, so the
+          # consumer layout is unchanged.
+          goPkgs = pkgs.mkGoPkgs {
+            src = self;
+            manifest = ./go-crap/go.nix;
+            subPath = "go-crap";
+            name = "crap";
+          };
+
+          # The module as the producer publishes it (tests included): the
+          # RFC 0001 self-consumption contract. Its go.mod is go.nix's render,
+          # which buildGoAuto accepts alongside the same manifest.
+          goCrapSrc = goPkgs.go-pkgs-test + "/go-crap";
+
+          # Shared by every go-crap binary: godyn (per-package) on igloo's
+          # godynSystems, buildGoApplication elsewhere; both reachable as
+          # passthru.native / passthru.bga, gates keyed off passthru.backend.
+          mkGoCrapBinary =
             {
-              linters.clippy.enable = true;
-              linters.clippy.manifest-path = "rust-crap/Cargo.toml";
-            }
-          ];
-          package = conformistPkg;
-          projectRootFile = "flake.nix";
-        };
+              pname,
+              description,
+              extraArgs ? { },
+            }:
+            (pkgs.buildGoAuto (
+              {
+                inherit pname;
+                version = crapVersion;
+                src = goCrapSrc;
+                manifest = ./go-crap/go.nix;
+                subPackages = [ "cmd/${pname}" ];
+                nativeArgs.commit = crapCommit;
+                bgaArgs = {
+                  commit = crapCommit;
+                  go = pkgs-master.go_1_26;
+                  GOTOOLCHAIN = "local";
+                };
+              }
+              // extraArgs
+            )).overrideAttrs
+              (old: {
+                meta = (old.meta or { }) // {
+                  inherit description;
+                  homepage = "https://code.linenisgreat.com/crap";
+                  license = pkgs.lib.licenses.mit;
+                  mainProgram = pname;
+                };
+              });
 
-        # Producer side of the flake-input-go_mod protocol (RFC 0001):
-        # exposes the go-crap module's source tree as `go-pkgs` so sibling
-        # flakes (spinclass, cutting-garden) bridge it with subPath "go-crap".
-        # go-crap/go.nix (igloo FDR 0008) replaces go.mod/go.sum/gomod2nix.toml:
-        # mkGoPkgs renders go.mod and gomod2nix.toml at go-pkgs/go-crap/, so the
-        # consumer layout is unchanged.
-        goPkgs = pkgs.mkGoPkgs {
-          src = self;
-          manifest = ./go-crap/go.nix;
-          subPath = "go-crap";
-          name = "crap";
-        };
+          # large-colon also carries go-crap's test, vet and lint lanes (godyn
+          # derives the whole module's test graph, not just cmd/large-colon's).
+          largeColonArgs = {
+            tests = true;
+            nativeCheckInputs = [ pkgs-master.git ];
+            postInstall = ''
+              ln -s $out/bin/large-colon "$out/bin/::"
+            '';
+          };
 
-        # The module as the producer publishes it (tests included): the
-        # RFC 0001 self-consumption contract. Its go.mod is go.nix's render,
-        # which buildGoAuto accepts alongside the same manifest.
-        goCrapSrc = goPkgs.go-pkgs-test + "/go-crap";
+          large-colon = mkGoCrapBinary {
+            pname = "large-colon";
+            description = "CRAP-2 validator and writer toolkit";
+            extraArgs = largeColonArgs;
+          };
 
-        # Shared by every go-crap binary: godyn (per-package) on igloo's
-        # godynSystems, buildGoApplication elsewhere; both reachable as
-        # passthru.native / passthru.bga, gates keyed off passthru.backend.
-        mkGoCrapBinary =
-          {
-            pname,
-            description,
-            extraArgs ? { },
-          }:
-          (pkgs.buildGoAuto (
-            {
-              inherit pname;
-              version = crapVersion;
-              src = goCrapSrc;
-              manifest = ./go-crap/go.nix;
-              subPackages = [ "cmd/${pname}" ];
-              nativeArgs.commit = crapCommit;
-              bgaArgs = {
+          # The same tests under the race detector: `just debug-go-test-race`.
+          large-colon-race = mkGoCrapBinary {
+            pname = "large-colon";
+            description = "CRAP-2 validator and writer toolkit (race)";
+            # godyn's -race links externally through cc (cmd/go needs cgo for it).
+            extraArgs = largeColonArgs // {
+              race = true;
+              nativeArgs = {
                 commit = crapCommit;
-                go = pkgs-master.go_1_26;
-                GOTOOLCHAIN = "local";
+                cc = pkgs.stdenv.cc;
               };
-            }
-            // extraArgs
-          )).overrideAttrs
-            (old: {
-              meta = (old.meta or { }) // {
-                inherit description;
-                homepage = "https://code.linenisgreat.com/crap";
-                license = pkgs.lib.licenses.mit;
-                mainProgram = pname;
-              };
-            });
-
-        # large-colon also carries go-crap's test, vet and lint lanes (godyn
-        # derives the whole module's test graph, not just cmd/large-colon's).
-        largeColonArgs = {
-          tests = true;
-          nativeCheckInputs = [ pkgs-master.git ];
-          postInstall = ''
-            ln -s $out/bin/large-colon "$out/bin/::"
-          '';
-        };
-
-        large-colon = mkGoCrapBinary {
-          pname = "large-colon";
-          description = "CRAP-2 validator and writer toolkit";
-          extraArgs = largeColonArgs;
-        };
-
-        # The same tests under the race detector: `just debug-go-test-race`.
-        large-colon-race = mkGoCrapBinary {
-          pname = "large-colon";
-          description = "CRAP-2 validator and writer toolkit (race)";
-          # godyn's -race links externally through cc (cmd/go needs cgo for it).
-          extraArgs = largeColonArgs // {
-            race = true;
-            nativeArgs = {
-              commit = crapCommit;
-              cc = pkgs.stdenv.cc;
             };
           };
-        };
 
-        crap-present = mkGoCrapBinary {
-          pname = "crap-present";
-          description = "ndjson-crap viewport presenter (standalone)";
-        };
-
-        rust-crap = pkgs-master.rustPlatform.buildRustPackage {
-          pname = "rust-crap";
-          version = crapVersion;
-          src = ./rust-crap;
-
-          # build.rs guards Cargo.toml's version against version.env; the
-          # nix src is the rust-crap/ subtree (no ../version.env), so the
-          # authoritative version arrives via this env var instead.
-          CRAP_VERSION = crapVersion;
-
-          cargoLock.lockFile = ./rust-crap/Cargo.lock;
-
-          meta = {
-            description = "CRAP-2 writer library";
-            homepage = "https://code.linenisgreat.com/crap";
-            license = pkgs.lib.licenses.mit;
+          crap-present = mkGoCrapBinary {
+            pname = "crap-present";
+            description = "ndjson-crap viewport presenter (standalone)";
           };
-        };
-      in
-      {
-        packages = {
-          default = pkgs.symlinkJoin {
-            name = "crap";
-            paths = [
+
+          rust-crap = pkgs-master.rustPlatform.buildRustPackage {
+            pname = "rust-crap";
+            version = crapVersion;
+            src = ./rust-crap;
+
+            # build.rs guards Cargo.toml's version against version.env; the
+            # nix src is the rust-crap/ subtree (no ../version.env), so the
+            # authoritative version arrives via this env var instead.
+            CRAP_VERSION = crapVersion;
+
+            cargoLock.lockFile = ./rust-crap/Cargo.lock;
+
+            meta = {
+              description = "CRAP-2 writer library";
+              homepage = "https://code.linenisgreat.com/crap";
+              license = pkgs.lib.licenses.mit;
+            };
+          };
+        in
+        {
+          packages = {
+            default = pkgs.symlinkJoin {
+              name = "crap";
+              paths = [
+                large-colon
+                crap-present
+              ];
+            };
+            inherit
               large-colon
+              large-colon-race
               crap-present
+              rust-crap
+              ;
+            # go-crap module source for sibling-flake consumers (RFC 0001).
+            inherit (goPkgs) go-pkgs;
+            # The generated config for the impure lane's `just lint-worktree`.
+            conformist-impure-config = conformistImpureEval.config.build.configFile;
+            # The store-pinned, toolchain-hermetic hook pair (conformist#47/#51/#54):
+            # pre-commit runs `conformist --staged --exit-zero-on-fix`; repair runs
+            # `conformist --commit --amend --exit-zero-on-fix`. Also on the devShell
+            # PATH below, under these same names, for a future sweatfile to wire.
+            conformist-pre-commit = conformistEval.config.build.preCommit;
+            conformist-repair = conformistEval.config.build.repair;
+          };
+
+          # `nix fmt` runs conformist wrapped with the generated config
+          # (conformistEval above).
+          formatter = conformistEval.config.build.wrapper;
+
+          # Sandboxed read-only gate: `conformist check` against a /nix/store
+          # snapshot of the tracked tree, no writes. Gated by `just lint-fmt`
+          # and `nix flake check`.
+          checks = {
+            formatting = conformistEval.config.build.check self;
+          }
+          # godyn lanes from go-crap/go.nix: per-package tests, vet, and
+          # godyn-lint (cmd/vet passes + staticcheck defaults). On the bga
+          # backend there is no per-package lane; the binaries still build.
+          // pkgs.lib.optionalAttrs (large-colon.passthru.backend == "native") {
+            go-tests = large-colon.passthru.checkAll;
+            go-vet = large-colon.passthru.vetAll;
+            go-lint = large-colon.passthru.lintAll;
+          };
+
+          devShells.default = pkgs.mkShell {
+            packages = [
+              # Go: no ambient `go` (igloo FDR 0007/0008). Dependencies live in
+              # go-crap/go.nix; go commands run inside nix through godyn-go,
+              # single-package tests through godyn-test.
+              pkgs.godyn-go
+              pkgs.godyn-test
+              pkgs-master.gopls
+              pkgs-master.gotools
+              pkgs-master.gofumpt
+              pkgs-master.goawk
+              pkgs-master.delve
+              pkgs-master.golangci-lint
+              pkgs-master.golines
+              pkgs-master.govulncheck
+              pkgs-master.parallel
+
+              # Rust
+              pkgs-master.rustc
+              pkgs-master.cargo
+              pkgs-master.rustfmt
+              pkgs-master.rust-analyzer
+              pkgs-master.cargo-deny
+              pkgs-master.cargo-edit
+              pkgs-master.cargo-watch
+              pkgs.openssl
+              pkgs.pkg-config
+
+              # Shell
+              pkgs-master.bash-language-server
+              pkgs-master.shellcheck
+              pkgs-master.shfmt
+
+              # conformist (treefmt successor) + the store-pinned hook pair
+              # from this repo's own config (conformistEval above) — `nix fmt`
+              # / `just lint-fmt` / `just codemod-fmt` resolve their formatter
+              # binaries from the generated config, not from PATH, so no
+              # per-formatter package needs to be listed here for those to
+              # work; gofumpt/rustfmt/shfmt/shellcheck above remain for
+              # interactive/LSP use (gopls, rust-analyzer,
+              # bash-language-server).
+              conformistPkg
+              conformistEval.config.build.preCommit
+              conformistEval.config.build.repair
+              pkgs.nixfmt
+
+              # Tools
+              pkgs.just
+              # gum: terminal UI logging for the maintenance recipes
+              # (bump-version / tag / release).
+              pkgs-master.gum
+              bats.packages.${system}.bats
+              bats.packages.${system}.batman
             ];
           };
-          inherit
-            large-colon
-            large-colon-race
-            crap-present
-            rust-crap
-            ;
-          # go-crap module source for sibling-flake consumers (RFC 0001).
-          inherit (goPkgs) go-pkgs;
-          # The generated config for the impure lane's `just lint-worktree`.
-          conformist-impure-config = conformistImpureEval.config.build.configFile;
-          # The store-pinned, toolchain-hermetic hook pair (conformist#47/#51/#54):
-          # pre-commit runs `conformist --staged --exit-zero-on-fix`; repair runs
-          # `conformist --commit --amend --exit-zero-on-fix`. Also on the devShell
-          # PATH below, under these same names, for a future sweatfile to wire.
-          conformist-pre-commit = conformistEval.config.build.preCommit;
-          conformist-repair = conformistEval.config.build.repair;
-        };
-
-        # `nix fmt` runs conformist wrapped with the generated config
-        # (conformistEval above).
-        formatter = conformistEval.config.build.wrapper;
-
-        # Sandboxed read-only gate: `conformist check` against a /nix/store
-        # snapshot of the tracked tree, no writes. Gated by `just lint-fmt`
-        # and `nix flake check`.
-        checks = {
-          formatting = conformistEval.config.build.check self;
         }
-        # godyn lanes from go-crap/go.nix: per-package tests, vet, and
-        # godyn-lint (cmd/vet passes + staticcheck defaults). On the bga
-        # backend there is no per-package lane; the binaries still build.
-        // pkgs.lib.optionalAttrs (large-colon.passthru.backend == "native") {
-          go-tests = large-colon.passthru.checkAll;
-          go-vet = large-colon.passthru.vetAll;
-          go-lint = large-colon.passthru.lintAll;
-        };
-
-        devShells.default = pkgs.mkShell {
-          packages = [
-            # Go: no ambient `go` (igloo FDR 0007/0008). Dependencies live in
-            # go-crap/go.nix; go commands run inside nix through godyn-go,
-            # single-package tests through godyn-test.
-            pkgs.godyn-go
-            pkgs.godyn-test
-            pkgs-master.gopls
-            pkgs-master.gotools
-            pkgs-master.gofumpt
-            pkgs-master.goawk
-            pkgs-master.delve
-            pkgs-master.golangci-lint
-            pkgs-master.golines
-            pkgs-master.govulncheck
-            pkgs-master.parallel
-
-            # Rust
-            pkgs-master.rustc
-            pkgs-master.cargo
-            pkgs-master.rustfmt
-            pkgs-master.rust-analyzer
-            pkgs-master.cargo-deny
-            pkgs-master.cargo-edit
-            pkgs-master.cargo-watch
-            pkgs.openssl
-            pkgs.pkg-config
-
-            # Shell
-            pkgs-master.bash-language-server
-            pkgs-master.shellcheck
-            pkgs-master.shfmt
-
-            # conformist (treefmt successor) + the store-pinned hook pair
-            # from this repo's own config (conformistEval above) — `nix fmt`
-            # / `just lint-fmt` / `just codemod-fmt` resolve their formatter
-            # binaries from the generated config, not from PATH, so no
-            # per-formatter package needs to be listed here for those to
-            # work; gofumpt/rustfmt/shfmt/shellcheck above remain for
-            # interactive/LSP use (gopls, rust-analyzer,
-            # bash-language-server).
-            conformistPkg
-            conformistEval.config.build.preCommit
-            conformistEval.config.build.repair
-            pkgs.nixfmt
-
-            # Tools
-            pkgs.just
-            # gum: terminal UI logging for the maintenance recipes
-            # (bump-version / tag / release).
-            pkgs-master.gum
-            bats.packages.${system}.bats
-            bats.packages.${system}.batman
-          ];
-        };
-      }
-    );
+      );
 }

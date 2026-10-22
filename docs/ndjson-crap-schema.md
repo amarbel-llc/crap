@@ -72,6 +72,20 @@ normative spec (records, driver mapping, and the producer reporter API).
 | ------- | ----------------------------------------- |
 | `crap`  | optional stream header; MUST be first when present |
 
+### Attachment (crap RFC 0002, draft)
+
+The CRAP attach protocol
+([`docs/rfcs/0002-attach-protocol.md`](rfcs/0002-attach-protocol.md))
+lets a harness advertise — via a single `CRAP=2` environment variable —
+that it consumes this format. Attached nodes are clients of a sink
+server (a unix socket birthed by the tree's root) that grants each
+connection a disjoint node-id base and splices record lines into one
+merged stream, so a process tree nests via the existing
+`tp`/`parent` lineage. It amends this schema additively:
+result-family records gain an OPTIONAL `parent` for lineage under an
+execution node, and node ids may start from a granted base (this
+schema requires only stream-uniqueness).
+
 ## Record schemas
 
 ### `crap` (header)
